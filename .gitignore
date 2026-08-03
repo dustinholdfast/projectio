@@ -5,6 +5,28 @@ out/
 target/
 .env
 .env.*
+!.env.example
 *.log
 .DS_Store
 .cargo-test-iso/
+
+# Next.js
+/.next/
+/out/
+
+# TypeScript
+*.tsbuildinfo
+
+# Vercel
+.vercel
+
+# Prisma
+/generated/prisma
+*.db
+*.db-journal
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

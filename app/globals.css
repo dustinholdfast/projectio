@@ -1,0 +1,186 @@
+@import "tailwindcss";
+
+/*
+ * Task Board — Design System
+ * Direction: "Calm Focus". A quiet, neutral workspace built around a single
+ * indigo accent, generous whitespace, soft borders and shadows. Class-based
+ * dark mode so the app can offer a manual toggle. Board label/status hues are
+ * exposed as tokens so columns and card tags share one source of truth.
+ *
+ * Consume these via semantic Tailwind utilities: bg-background, text-foreground,
+ * bg-card, text-muted-foreground, border-border, bg-primary, ring-ring, etc.
+ * Restyle work should adjust the token values here, not the component classes.
+ */
+
+/* Enable class-based dark mode: `dark:` applies when a `.dark` ancestor exists. */
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Base surfaces */
+  --background: #f8fafc; /* slate-50 — app canvas */
+  --foreground: #0f172a; /* slate-900 — primary text */
+  --surface: #ffffff; /* raised panels (columns) */
+  --surface-foreground: #0f172a;
+  --card: #ffffff; /* task cards, popovers */
+  --card-foreground: #0f172a;
+
+  /* Muted / secondary */
+  --muted: #f1f5f9; /* slate-100 */
+  --muted-foreground: #64748b; /* slate-500 */
+  --secondary: #f1f5f9;
+  --secondary-foreground: #0f172a;
+  --accent: #eef2ff; /* indigo-50 — hover/selected tint */
+  --accent-foreground: #3730a3; /* indigo-800 */
+
+  /* Lines & focus */
+  --border: #e2e8f0; /* slate-200 */
+  --input: #cbd5e1; /* slate-300 — control borders */
+  --ring: #6366f1; /* indigo-500 — focus ring */
+
+  /* Brand / primary action */
+  --primary: #6366f1; /* indigo-500 */
+  --primary-hover: #4f46e5; /* indigo-600 */
+  --primary-foreground: #ffffff;
+
+  /* Feedback */
+  --destructive: #e11d48; /* rose-600 */
+  --destructive-foreground: #ffffff;
+  --success: #16a34a; /* green-600 */
+  --warning: #d97706; /* amber-600 */
+
+  /* Board label palette — used for column accents & card tags.
+     Each hue ships a soft fill + readable foreground for chips. */
+  --label-slate: #64748b;
+  --label-slate-soft: #f1f5f9;
+  --label-blue: #2563eb;
+  --label-blue-soft: #dbeafe;
+  --label-amber: #d97706;
+  --label-amber-soft: #fef3c7;
+  --label-green: #16a34a;
+  --label-green-soft: #dcfce7;
+  --label-rose: #e11d48;
+  --label-rose-soft: #ffe4e6;
+  --label-violet: #7c3aed;
+  --label-violet-soft: #ede9fe;
+
+  /* Radii & elevation */
+  --radius: 0.625rem; /* 10px base */
+  --shadow-sm: 0 1px 2px 0 rgb(15 23 42 / 0.06);
+  --shadow-md: 0 4px 12px -2px rgb(15 23 42 / 0.10);
+  --shadow-lg: 0 12px 32px -8px rgb(15 23 42 / 0.18);
+}
+
+.dark {
+  --background: #0b1120; /* slate-950-ish canvas */
+  --foreground: #e2e8f0; /* slate-200 */
+  --surface: #111827; /* raised panels */
+  --surface-foreground: #e2e8f0;
+  --card: #1e293b; /* slate-800 — task cards */
+  --card-foreground: #e2e8f0;
+
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8; /* slate-400 */
+  --secondary: #1e293b;
+  --secondary-foreground: #e2e8f0;
+  --accent: #312e81; /* indigo-900 tint */
+  --accent-foreground: #c7d2fe; /* indigo-200 */
+
+  --border: #1f2937; /* slate-800 */
+  --input: #334155; /* slate-700 */
+  --ring: #818cf8; /* indigo-400 */
+
+  --primary: #6366f1;
+  --primary-hover: #818cf8;
+  --primary-foreground: #ffffff;
+
+  --destructive: #f43f5e; /* rose-500 */
+  --destructive-foreground: #ffffff;
+  --success: #22c55e;
+  --warning: #f59e0b;
+
+  --label-slate: #94a3b8;
+  --label-slate-soft: #1e293b;
+  --label-blue: #60a5fa;
+  --label-blue-soft: #172554;
+  --label-amber: #fbbf24;
+  --label-amber-soft: #451a03;
+  --label-green: #4ade80;
+  --label-green-soft: #052e16;
+  --label-rose: #fb7185;
+  --label-rose-soft: #4c0519;
+  --label-violet: #a78bfa;
+  --label-violet-soft: #2e1065;
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 12px 32px -8px rgb(0 0 0 / 0.6);
+}
+
+/* Map CSS variables to Tailwind's theme so `bg-card`, `text-muted-foreground`,
+   `border-border`, `rounded-lg`, `shadow-md`, `bg-label-amber-soft`, etc. exist. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-foreground: var(--surface-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+
+  --color-label-slate: var(--label-slate);
+  --color-label-slate-soft: var(--label-slate-soft);
+  --color-label-blue: var(--label-blue);
+  --color-label-blue-soft: var(--label-blue-soft);
+  --color-label-amber: var(--label-amber);
+  --color-label-amber-soft: var(--label-amber-soft);
+  --color-label-green: var(--label-green);
+  --color-label-green-soft: var(--label-green-soft);
+  --color-label-rose: var(--label-rose);
+  --color-label-rose-soft: var(--label-rose-soft);
+  --color-label-violet: var(--label-violet);
+  --color-label-violet-soft: var(--label-violet-soft);
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+}
+
+* {
+  border-color: var(--border);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}

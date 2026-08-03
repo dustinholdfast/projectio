@@ -1,0 +1,243 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { POSITION_STEP, midpointPosition } from "@/lib/reorder";
+
+// Server actions backing the board view: create a board, a column, or a card.
+// Every action re-reads the session and verifies the target belongs to the
+// current user before writing, so a forged id can never mutate another account's
+// data. Ordering uses the `position` Float scheme (see prisma/schema.prisma): a
+// new sibling is appended by taking the current max position plus a fixed step,
+// leaving room for a later drag-drop insert to take a midpoint between neighbors.
+
+// Shape returned to the client forms via `useActionState`. `undefined` is the
+// initial (no-error) state; a populated `error` is rendered under the form. The
+// `position` scheme (append step + midpoint) lives in @/lib/reorder so it can be
+// unit-tested independently of these server actions.
+export type BoardActionState = { error: string } | undefined;
+
+async function requireUserId(): Promise<string | null> {
+  const session = await auth();
+  return session?.user?.id ?? null;
+}
+
+/** Create the user's first board and reload the view. */
+export async function createBoard(
+  _prevState: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> {
+  const userId = await requireUserId();
+  if (!userId) return { error: "Your session has expired. Please sign in again." };
+
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) return { error: "Enter a name for your board." };
+
+  await prisma.board.create({
+    data: { name, ownerId: userId },
+  });
+
+  revalidatePath("/");
+}
+
+/** Append a new column to a board the current user owns. */
+export async function createColumn(
+  _prevState: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> {
+  const userId = await requireUserId();
+  if (!userId) return { error: "Your session has expired. Please sign in again." };
+
+  const boardId = String(formData.get("boardId") ?? "");
+  const name = String(formData.get("name") ?? "").trim();
+  if (!boardId) return { error: "Missing board." };
+  if (!name) return { error: "Enter a column name." };
+
+  // Ownership check: the board must belong to the current user.
+  const board = await prisma.board.findUnique({
+    where: { id: boardId },
+    select: { ownerId: true },
+  });
+  if (!board || board.ownerId !== userId) {
+    return { error: "Board not found." };
+  }
+
+  const last = await prisma.column.findFirst({
+    where: { boardId },
+    orderBy: { position: "desc" },
+    select: { position: true },
+  });
+
+  await prisma.column.create({
+    data: {
+      name,
+      boardId,
+      position: (last?.position ?? 0) + POSITION_STEP,
+    },
+  });
+
+  revalidatePath("/");
+}
+
+/** Append a new card to a column whose board the current user owns. */
+export async function createCard(
+  _prevState: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> {
+  const userId = await requireUserId();
+  if (!userId) return { error: "Your session has expired. Please sign in again." };
+
+  const columnId = String(formData.get("columnId") ?? "");
+  const title = String(formData.get("title") ?? "").trim();
+  const description = String(formData.get("description") ?? "").trim();
+  if (!columnId) return { error: "Missing column." };
+  if (!title) return { error: "Enter a card title." };
+
+  // Ownership check: walk column → board → owner in one query.
+  const column = await prisma.column.findUnique({
+    where: { id: columnId },
+    select: { board: { select: { ownerId: true } } },
+  });
+  if (!column || column.board.ownerId !== userId) {
+    return { error: "Column not found." };
+  }
+
+  const last = await prisma.card.findFirst({
+    where: { columnId },
+    orderBy: { position: "desc" },
+    select: { position: true },
+  });
+
+  await prisma.card.create({
+    data: {
+      title,
+      description: description || null,
+      columnId,
+      position: (last?.position ?? 0) + POSITION_STEP,
+    },
+  });
+
+  revalidatePath("/");
+}
+
+// ── Drag-drop reordering ────────────────────────────────────────────────────
+//
+// The board's drag-drop UI (components/board/board-view.tsx) reorders optimistically
+// in local state, then calls one of these actions to persist the move. Both use the
+// midpoint `position` scheme: the client sends the moved item plus the ids of the
+// neighbors it now sits between (either may be null at an end), and the server writes
+// a single row — the new position is the midpoint of the neighbor positions, so a
+// reorder is always O(1) writes and never rewrites untouched siblings.
+
+// Result of a reorder. `undefined` means success (nothing to render); a populated
+// `error` tells the client to roll back its optimistic state and refresh.
+export type ReorderResult = { error: string } | undefined;
+
+/** Persist a column move within its board. Neighbors are the columns it now sits between. */
+export async function reorderColumn(input: {
+  columnId: string;
+  prevColumnId: string | null;
+  nextColumnId: string | null;
+}): Promise<ReorderResult> {
+  const userId = await requireUserId();
+  if (!userId) return { error: "Your session has expired. Please sign in again." };
+
+  // Ownership: the moved column must belong to a board the current user owns.
+  const column = await prisma.column.findUnique({
+    where: { id: input.columnId },
+    select: { boardId: true, board: { select: { ownerId: true } } },
+  });
+  if (!column || column.board.ownerId !== userId) {
+    return { error: "Column not found." };
+  }
+
+  // Read neighbor positions scoped to the same board so a forged neighbor id from
+  // another board can never influence the computed position.
+  const [prev, next] = await Promise.all([
+    input.prevColumnId
+      ? prisma.column.findFirst({
+          where: { id: input.prevColumnId, boardId: column.boardId },
+          select: { position: true },
+        })
+      : null,
+    input.nextColumnId
+      ? prisma.column.findFirst({
+          where: { id: input.nextColumnId, boardId: column.boardId },
+          select: { position: true },
+        })
+      : null,
+  ]);
+
+  await prisma.column.update({
+    where: { id: input.columnId },
+    data: { position: midpointPosition(prev?.position, next?.position) },
+  });
+
+  revalidatePath("/");
+}
+
+/**
+ * Persist a card move — within its column or into another column of the same board.
+ * Neighbors are the cards it now sits between in the target column.
+ */
+export async function reorderCard(input: {
+  cardId: string;
+  toColumnId: string;
+  prevCardId: string | null;
+  nextCardId: string | null;
+}): Promise<ReorderResult> {
+  const userId = await requireUserId();
+  if (!userId) return { error: "Your session has expired. Please sign in again." };
+
+  // Ownership: both the moved card and the destination column must belong to a
+  // board the current user owns. Reading the board id off each lets us also reject
+  // moves that would cross boards.
+  const [card, toColumn] = await Promise.all([
+    prisma.card.findUnique({
+      where: { id: input.cardId },
+      select: { column: { select: { boardId: true, board: { select: { ownerId: true } } } } },
+    }),
+    prisma.column.findUnique({
+      where: { id: input.toColumnId },
+      select: { boardId: true, board: { select: { ownerId: true } } },
+    }),
+  ]);
+  if (!card || card.column.board.ownerId !== userId) {
+    return { error: "Card not found." };
+  }
+  if (!toColumn || toColumn.board.ownerId !== userId) {
+    return { error: "Column not found." };
+  }
+  if (card.column.boardId !== toColumn.boardId) {
+    return { error: "Cards can only move within the same board." };
+  }
+
+  // Neighbor positions are scoped to the destination column so ids from a different
+  // column (or a stale drop) can't skew the midpoint.
+  const [prev, next] = await Promise.all([
+    input.prevCardId
+      ? prisma.card.findFirst({
+          where: { id: input.prevCardId, columnId: input.toColumnId },
+          select: { position: true },
+        })
+      : null,
+    input.nextCardId
+      ? prisma.card.findFirst({
+          where: { id: input.nextCardId, columnId: input.toColumnId },
+          select: { position: true },
+        })
+      : null,
+  ]);
+
+  await prisma.card.update({
+    where: { id: input.cardId },
+    data: {
+      columnId: input.toColumnId,
+      position: midpointPosition(prev?.position, next?.position),
+    },
+  });
+
+  revalidatePath("/");
+}

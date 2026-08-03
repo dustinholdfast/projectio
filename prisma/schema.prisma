@@ -1,0 +1,97 @@
+// Prisma schema for the Task Board app.
+// Docs: https://pris.ly/d/prisma-schema
+//
+// Domain: a single-user-per-board Kanban board, backed by Postgres (Supabase in
+// hosted environments, a local container in development). A User owns Boards; each
+// Board has ordered Columns; each Column has ordered Cards. Ordering is a
+// persisted `position` Float per sibling set — a card/column dropped between
+// two neighbors gets the midpoint of their positions, so a reorder only writes
+// the moved row (see the "Persist reorder" card). Larger position = later.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// An application user. Authentication is credential-based (Auth.js credentials
+/// provider, wired in a later card): `email` is the login identifier and
+/// `passwordHash` holds a bcrypt hash — never a plaintext password.
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  boards Board[]
+}
+
+/// One recorded authentication attempt, used for rate limiting (see
+/// `lib/rate-limit.ts`). Rows are transient: they are counted within a sliding
+/// window and pruned once they fall outside it, so this table stays small.
+///
+/// Deliberately not related to `User` — attempts are recorded for addresses that
+/// may not exist, and must survive an account being deleted.
+model AuthAttempt {
+  id        String   @id @default(cuid())
+  /// Namespaced bucket, e.g. `login:ip:1.2.3.4` or `login:email:a@b.com`.
+  key       String
+  createdAt DateTime @default(now())
+
+  // Every query counts recent rows for one key, so both columns are needed.
+  @@index([key, createdAt])
+}
+
+/// A Kanban board owned by a single User. Deleting the owner cascades to their
+/// boards (and, transitively, columns and cards).
+model Board {
+  id        String   @id @default(cuid())
+  name      String
+  ownerId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner   User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  columns Column[]
+
+  @@index([ownerId])
+}
+
+/// A vertical lane on a board (e.g. "To Do", "In Progress", "Done").
+/// `position` orders columns left-to-right within their board.
+model Column {
+  id        String   @id @default(cuid())
+  name      String
+  position  Float
+  boardId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  board Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  cards Card[]
+
+  // Ordered lookups of a board's columns hit (boardId, position) together.
+  @@index([boardId, position])
+}
+
+/// A task card within a column. `position` orders cards top-to-bottom within
+/// their column; a move to another column updates `columnId` and `position`.
+model Card {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  position    Float
+  columnId    String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  column Column @relation(fields: [columnId], references: [id], onDelete: Cascade)
+
+  // Ordered lookups of a column's cards hit (columnId, position) together.
+  @@index([columnId, position])
+}
