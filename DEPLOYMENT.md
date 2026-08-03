@@ -716,7 +716,10 @@ npm ci
 $env:DIRECT_URL = '<direct-string>'; npm run db:deploy
 npm run build
 $env:DATABASE_URL = '<pooler-string>'
-$env:AUTH_SECRET  = [Convert]::ToBase64String((1..32 | % { Get-Random -Max 256 }))
+# Cryptographic RNG, not Get-Random — this value signs session tokens.
+$bytes = [byte[]]::new(32)
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+$env:AUTH_SECRET = [Convert]::ToBase64String($bytes)
 npm run start
 ```
 
