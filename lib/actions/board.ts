@@ -6,6 +6,12 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { POSITION_STEP, midpointPosition } from "@/lib/reorder";
+import {
+  type DueStatus,
+  parseDueDate,
+  scheduleForStatus,
+  startOfUtcDay,
+} from "@/lib/due-status";
 
 // Server actions backing the board screens: create/rename/delete a board, and
 // add columns and cards to one. Every action re-reads the session and verifies
@@ -308,4 +314,105 @@ export async function reorderCard(input: {
   });
 
   revalidateBoard(toColumn.boardId);
+}
+
+// ── Scheduling ───────────────────────────────────────────────────────────────
+//
+// A card's Overdue / Due Now / Later / Paused lane is derived from its `dueDate`
+// and `pausedAt` (see lib/due-status.ts) rather than stored, so these actions set
+// the underlying fields and let the status follow. That keeps a single source of
+// truth: a card cannot be marked "Overdue" while holding a future date.
+
+/** Look up a card the current user owns, returning the board it lives on. */
+async function ownedCardBoardId(
+  cardId: string,
+  userId: string,
+): Promise<string | null> {
+  const card = await prisma.card.findUnique({
+    where: { id: cardId },
+    select: { column: { select: { boardId: true, board: { select: { ownerId: true } } } } },
+  });
+  if (!card || card.column.board.ownerId !== userId) return null;
+  return card.column.boardId;
+}
+
+/**
+ * Move a card into a due-status lane (the drag-and-drop path).
+ *
+ * Overdue is rejected: it is not a state anyone can choose, only one time
+ * produces. The UI already refuses it as a drop target; this is the server-side
+ * half of the same rule.
+ */
+export async function setCardDueStatus(input: {
+  cardId: string;
+  status: DueStatus;
+}): Promise<ReorderResult> {
+  const userId = await requireUserId();
+  if (!userId) return { error: "Your session has expired. Please sign in again." };
+
+  const boardId = await ownedCardBoardId(input.cardId, userId);
+  if (!boardId) return { error: "Card not found." };
+
+  const current = await prisma.card.findUnique({
+    where: { id: input.cardId },
+    select: { dueDate: true, pausedAt: true },
+  });
+  if (!current) return { error: "Card not found." };
+
+  const schedule = scheduleForStatus(input.status, new Date(), current);
+  if (!schedule) {
+    return { error: "A card becomes overdue on its own — set a due date instead." };
+  }
+
+  await prisma.card.update({ where: { id: input.cardId }, data: schedule });
+
+  revalidateBoard(boardId);
+}
+
+/**
+ * Set or clear a card's due date (the date-picker path).
+ *
+ * Choosing a date also unpauses: picking a deadline for parked work is a clear
+ * statement that it is back in play.
+ */
+export async function setCardDueDate(input: {
+  cardId: string;
+  /** `YYYY-MM-DD`, or empty to clear the date. */
+  dueDate: string;
+}): Promise<ReorderResult> {
+  const userId = await requireUserId();
+  if (!userId) return { error: "Your session has expired. Please sign in again." };
+
+  const boardId = await ownedCardBoardId(input.cardId, userId);
+  if (!boardId) return { error: "Card not found." };
+
+  const trimmed = input.dueDate.trim();
+  const dueDate = trimmed ? parseDueDate(trimmed) : null;
+  if (trimmed && !dueDate) return { error: "That is not a valid date." };
+
+  await prisma.card.update({
+    where: { id: input.cardId },
+    data: { dueDate, pausedAt: dueDate ? null : undefined },
+  });
+
+  revalidateBoard(boardId);
+}
+
+/** Pause or resume a card, keeping its due date either way. */
+export async function setCardPaused(input: {
+  cardId: string;
+  paused: boolean;
+}): Promise<ReorderResult> {
+  const userId = await requireUserId();
+  if (!userId) return { error: "Your session has expired. Please sign in again." };
+
+  const boardId = await ownedCardBoardId(input.cardId, userId);
+  if (!boardId) return { error: "Card not found." };
+
+  await prisma.card.update({
+    where: { id: input.cardId },
+    data: { pausedAt: input.paused ? startOfUtcDay(new Date()) : null },
+  });
+
+  revalidateBoard(boardId);
 }

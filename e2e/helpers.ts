@@ -20,3 +20,17 @@ export async function gotoReady(page: Page, path: string): Promise<void> {
   await page.goto(path);
   await page.waitForLoadState("networkidle");
 }
+
+/**
+ * Wait for the page a sign-in just navigated to.
+ *
+ * The same on-demand compilation applies to routes reached by *navigating*, not
+ * just by `goto`: signing in lands on `/`, and the first spec to get there waits
+ * for it to build. Without this, the next click races that compile — which made
+ * specs pass in the full suite (an earlier spec had already warmed the route) and
+ * fail when run alone.
+ */
+export async function waitForLanding(page: Page): Promise<void> {
+  await page.waitForURL(/\/$/);
+  await page.waitForLoadState("networkidle");
+}

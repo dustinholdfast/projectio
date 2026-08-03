@@ -108,6 +108,14 @@ model Card {
   description String?
   position    Float
   columnId    String
+  /// Calendar day the card is due, stored date-only (`@db.Date`) because a due
+  /// date is a day, not an instant — storing a timestamp would make the same
+  /// card read as due on different days in different timezones. Null = unscheduled.
+  dueDate     DateTime? @db.Date
+  /// When the card was paused. Null = not paused. A timestamp rather than a
+  /// boolean so "how long has this been parked?" stays answerable. Paused wins
+  /// over any due date when deriving status (see lib/due-status.ts).
+  pausedAt    DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { gotoReady } from "./helpers";
+import { gotoReady, waitForLanding } from "./helpers";
 
 // Coverage of the multi-board surface: the list, creating a board, renaming it,
 // deleting it, and the ownership boundary between accounts.
@@ -12,7 +12,7 @@ async function loginAsDemo(page: Page) {
   await page.getByLabel("Email").fill(DEMO_EMAIL);
   await page.getByLabel("Password").fill(DEMO_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/$/);
+  await waitForLanding(page);
 }
 
 test("lists every seeded board and opens one", async ({ page }) => {

@@ -167,6 +167,33 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
 - **Revalidate through `revalidateBoard(boardId)`**, which refreshes both
   `/board/[id]` and `/` — the list shows per-board counts, so a card write
   changes it too. Do not reintroduce a bare `revalidatePath("/")`.
+### Scheduling (Overdue / Due Now / Later / Paused)
+
+- `/board/[id]?group=due` swaps the columns for four derived lanes. The choice
+  lives in the URL (`components/board/group-toggle.tsx`) so it survives a reload
+  and can be shared; anything other than `due` falls back to columns.
+- **The lane is derived, never stored.** `lib/due-status.ts` is the single source
+  of the rules — `dueStatusOf` for reading, `scheduleForStatus` for its inverse —
+  and it is pure so the boundaries are testable without a clock or a database.
+  Do not add a `status` column: it would let a card claim "Overdue" while holding
+  a future date.
+- Rules: Paused wins over any date (parked work should stop nagging); no due date
+  means Later (unscheduled is not late); otherwise Overdue / Due Now / Later by
+  calendar day.
+- `Card.dueDate` is `@db.Date` — a due date is a *day*, not an instant. Read it
+  with `dayKeyOfDueDate` (UTC components, since `@db.Date` returns midnight UTC);
+  read "today" with `dayKeyOfInstant` (local components). Mixing the two shifts
+  the day for anyone behind UTC. **Known limitation:** "today" is the *server's*
+  day, so the Overdue boundary moves at the server's midnight. Set `TZ` on the
+  host; a real fix needs a per-user timezone.
+- **Overdue is a drag source but not a drop target** (`DUE_STATUS_DROPPABLE`).
+  Nothing coherent can be meant by dropping a card into it — lateness is what
+  time does to a card. The server action rejects it too, not just the UI.
+- Dragging to Later *clears* the due date rather than inventing a future one;
+  pausing *keeps* it so resuming restores the original schedule.
+- Cards in the schedule view are plain `useDraggable`, not sortables: `position`
+  is per-column, so there is nowhere to persist an order within a derived lane
+  and offering one would be a lie. They sort by due date, soonest first.
 - Inline UIs are client components in `components/board/` (`add-card-form`,
   `add-column-form`, `create-board-form`, `board-settings`). They compose the
   `@/components/ui` primitives and call the actions; editors use `useTransition`
@@ -229,8 +256,11 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
   the board specs rely on; keep it that way.
   `e2e/boards.spec.ts` covers the list, create → rename → delete, and the
   cross-account boundary (another user's board URL must 404).
+  `e2e/due-status.spec.ts` covers the schedule view: the toggle, seeded cards
+  landing in the lane their date implies, Overdue refusing drops, and pause →
+  resume round-tripping through a reload.
 - **Navigate with `gotoReady()` (`e2e/helpers.ts`), not `page.goto()`, whenever a
-  click follows.** `next dev` compiles routes on demand and serves HTML before
+  click follows**, and `waitForLanding()` after a sign-in click. `next dev` compiles routes on demand and serves HTML before
   the JavaScript is ready; a click landing in that window submits the form
   natively, without the header Next needs to recognise a server action, so the
   action never runs and the page re-renders unchanged — no error, no navigation,
@@ -240,6 +270,10 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
 - Assertions on inline errors should scope to the form
   (`page.locator("form").getByRole("alert")`): Next's dev overlay also exposes a
   `role="alert"` node, so an unscoped query hits a strict-mode violation.
+- The suite runs against `next dev` in a OneDrive-synced directory, so first-hit
+  route compilation is occasionally *very* slow — the per-test timeout is 90s for
+  that reason, and a lone timeout on the first test of a run is usually the
+  machine, not the code. Re-run before investigating.
 - **Two timing rules the reorder e2e test depends on**, both of which a networked
   database makes unforgiving: dnd-kit keyboard steps (lift → arrow → drop) must
   each be awaited before the next — the test gates on `aria-pressed` and on

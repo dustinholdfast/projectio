@@ -8,11 +8,12 @@ Written against the code as it stands on 2026-08-03 (Next.js 15.5.22, Prisma
 
 > **Status: the SQLite → Postgres migration in section 3 has been applied and
 > verified**, along with auth rate limiting, password reset (§10.3), and
-> multi-board support. Verified locally against Postgres 17.10: migrations apply,
-> the seed runs, `npm run build` succeeds, 68 unit tests pass, and all 9
-> Playwright end-to-end tests pass — board create/rename/delete, the
-> cross-account 404, card create and keyboard-drag reorder with persistence,
-> login throttling, full password recovery, and account-enumeration resistance.
+> multi-board support and card scheduling. Verified locally against Postgres
+> 17.10: migrations apply, the seed runs, `npm run build` succeeds, 92 unit tests
+> pass, and all 13 Playwright end-to-end tests pass — board create/rename/delete,
+> the cross-account 404, card create and keyboard-drag reorder with persistence,
+> the Overdue / Due Now / Later / Paused schedule view, login throttling, full
+> password recovery, and account-enumeration resistance.
 >
 > What remains before going live is infrastructure, not code: create the Supabase
 > project (§4), set the environment variables (§5), and clear the deployment
@@ -33,7 +34,9 @@ Written against the code as it stands on 2026-08-03 (Next.js 15.5.22, Prisma
 | Styling | Tailwind CSS v4 | Build-time only |
 
 Data model: `User → Board → Column → Card`, ordered by a `Float position` with
-midpoint inserts. Cascading deletes throughout.
+midpoint inserts. Cascading deletes throughout. Cards carry a date-only `dueDate`
+and a `pausedAt`, from which the Overdue / Due Now / Later / Paused lanes are
+derived rather than stored.
 
 ### What Supabase is doing here
 

@@ -8,6 +8,8 @@ import {
   KeyboardSensor,
   PointerSensor,
   closestCorners,
+  useDraggable,
+  useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent,
@@ -32,8 +34,23 @@ import {
 } from "@/components/ui";
 import { AddCardForm } from "@/components/board/add-card-form";
 import { AddColumnForm } from "@/components/board/add-column-form";
-import { reorderCard, reorderColumn } from "@/lib/actions/board";
+import { CardSchedule } from "@/components/board/card-schedule";
+import {
+  reorderCard,
+  reorderColumn,
+  setCardDueStatus,
+} from "@/lib/actions/board";
 import { planCardMove, planColumnMove } from "@/lib/reorder";
+import {
+  DUE_STATUS_DROPPABLE,
+  DUE_STATUS_LABEL,
+  DUE_STATUS_ORDER,
+  type DueStatus,
+  dayKeyOfDueDate,
+  dueStatusOf,
+  groupByDueStatus,
+  scheduleForStatus,
+} from "@/lib/due-status";
 import type {
   BoardCard,
   BoardWithColumns,
@@ -54,11 +71,23 @@ type DragKind =
   | { type: "column"; column: ColumnWithCards; hue: BadgeColor }
   | { type: "card"; card: BoardCard; hue: BadgeColor; tag: string };
 
-export function BoardView({ board }: { board: BoardWithColumns }) {
+export function BoardView({
+  board,
+  groupBy = "column",
+}: {
+  board: BoardWithColumns;
+  /** Which lanes to render. Driven by the `?group=` param so it survives reload. */
+  groupBy?: "column" | "due";
+}) {
   const router = useRouter();
   const [columns, setColumns] = React.useState<ColumnWithCards[]>(board.columns);
   const [active, setActive] = React.useState<DragKind | null>(null);
   const [, startTransition] = React.useTransition();
+
+  // "Today" is read once per render pass rather than per card, so every card in
+  // one render is bucketed against the same instant — otherwise a render that
+  // straddles midnight could place two equally-dated cards in different lanes.
+  const now = React.useMemo(() => new Date(), [board]);
 
   // Re-sync from the server whenever a fresh board arrives (after revalidation).
   // Our optimistic state already matches a successful move, so this is a no-op in
@@ -119,6 +148,36 @@ export function BoardView({ board }: { board: BoardWithColumns }) {
     if (!over) return;
 
     const kind = dragged.data.current?.type;
+
+    // ── Due-status lane move ────────────────────────────────────────────────
+    // In due mode a drop changes *when* a card is due, not where it sits: the
+    // lane is derived, so we write dueDate/pausedAt and let the grouping follow.
+    // Cards keep their column throughout — this view never moves work between
+    // stages.
+    if (groupBy === "due") {
+      if (kind !== "card") return;
+      const target = over.data.current?.dueStatus as DueStatus | undefined;
+      if (!target) return;
+
+      const cardId = String(dragged.id);
+      const card = columns.flatMap((c) => c.cards).find((k) => k.id === cardId);
+      if (!card) return;
+      if (dueStatusOf(card, now) === target) return;
+
+      const schedule = scheduleForStatus(target, now, card);
+      if (!schedule) return; // Overdue: not a reachable target.
+
+      setColumns((prev) =>
+        prev.map((column) => ({
+          ...column,
+          cards: column.cards.map((k) =>
+            k.id === cardId ? { ...k, ...schedule } : k,
+          ),
+        })),
+      );
+      persist(() => setCardDueStatus({ cardId, status: target }));
+      return;
+    }
 
     // ── Column reorder ──────────────────────────────────────────────────────
     // The drop decision (new order + neighbors) lives in the pure planner; here
@@ -190,19 +249,25 @@ export function BoardView({ board }: { board: BoardWithColumns }) {
       onDragCancel={() => setActive(null)}
     >
       <section className="flex flex-1 items-start gap-4 overflow-x-auto p-4 sm:p-6">
-        <SortableContext
-          items={columns.map((c) => c.id)}
-          strategy={horizontalListSortingStrategy}
-        >
-          {columns.map((column, index) => (
-            <SortableColumn
-              key={column.id}
-              column={column}
-              hue={columnHue(column.name, index)}
-            />
-          ))}
-        </SortableContext>
-        <AddColumnForm boardId={board.id} />
+        {groupBy === "due" ? (
+          <DueLanes columns={columns} now={now} hueFor={hueFor} />
+        ) : (
+          <>
+            <SortableContext
+              items={columns.map((c) => c.id)}
+              strategy={horizontalListSortingStrategy}
+            >
+              {columns.map((column, index) => (
+                <SortableColumn
+                  key={column.id}
+                  column={column}
+                  hue={columnHue(column.name, index)}
+                />
+              ))}
+            </SortableContext>
+            <AddColumnForm boardId={board.id} />
+          </>
+        )}
       </section>
 
       <DragOverlay>
@@ -215,6 +280,172 @@ export function BoardView({ board }: { board: BoardWithColumns }) {
     </DndContext>
   );
 }
+
+// ── Due-status lanes ─────────────────────────────────────────────────────────
+//
+// The schedule view. Lanes are derived from each card's dueDate/pausedAt, so
+// unlike columns they are fixed, cannot be reordered, and hold no `position` of
+// their own — which is why cards here are plain draggables rather than sortables:
+// there is nowhere to persist an order *within* a lane, so offering one would be
+// a lie. Cards sort by due date, soonest first.
+
+function DueLanes({
+  columns,
+  now,
+  hueFor,
+}: {
+  columns: ColumnWithCards[];
+  now: Date;
+  hueFor: (columnId: string) => BadgeColor;
+}) {
+  // Flatten every column's cards, remembering which column each came from so the
+  // card keeps its stage tag and hue in this view.
+  const all = React.useMemo(
+    () =>
+      columns.flatMap((column) =>
+        column.cards.map((card) => ({ card, columnName: column.name })),
+      ),
+    [columns],
+  );
+
+  const grouped = React.useMemo(
+    () => groupByDueStatus(all.map((entry) => entry.card), now),
+    [all, now],
+  );
+  const columnNameOf = React.useMemo(
+    () => new Map(all.map((entry) => [entry.card.id, entry.columnName])),
+    [all],
+  );
+
+  return (
+    <>
+      {DUE_STATUS_ORDER.map((status) => (
+        <DueLane
+          key={status}
+          status={status}
+          cards={[...grouped[status]].sort(byDueDateThenTitle)}
+          hueFor={hueFor}
+          columnNameOf={columnNameOf}
+        />
+      ))}
+    </>
+  );
+}
+
+/** Soonest deadline first; undated cards last, then alphabetical for stability. */
+function byDueDateThenTitle(a: BoardCard, b: BoardCard): number {
+  if (a.dueDate && b.dueDate) {
+    const diff = a.dueDate.getTime() - b.dueDate.getTime();
+    if (diff !== 0) return diff;
+  } else if (a.dueDate !== b.dueDate) {
+    return a.dueDate ? -1 : 1;
+  }
+  return a.title.localeCompare(b.title);
+}
+
+function DueLane({
+  status,
+  cards,
+  hueFor,
+  columnNameOf,
+}: {
+  status: DueStatus;
+  cards: BoardCard[];
+  hueFor: (columnId: string) => BadgeColor;
+  columnNameOf: Map<string, string>;
+}) {
+  const droppable = DUE_STATUS_DROPPABLE[status];
+  const { setNodeRef, isOver } = useDroppable({
+    id: `due:${status}`,
+    disabled: !droppable,
+    data: { type: "dueLane", dueStatus: status },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      data-testid="due-lane"
+      data-due-status={status}
+      className={`flex max-h-full w-72 shrink-0 flex-col gap-3 rounded-xl border bg-surface p-3 shadow-sm ${
+        isOver && droppable
+          ? "border-primary ring-2 ring-ring"
+          : "border-border"
+      }`}
+    >
+      <div className="flex items-center gap-2 px-1">
+        <span
+          aria-hidden
+          className={`size-2.5 shrink-0 rounded-full ${HUE_DOT[DUE_HUE[status]]}`}
+        />
+        <h2 className="flex-1 truncate text-sm font-semibold tracking-tight">
+          {DUE_STATUS_LABEL[status]}
+        </h2>
+        <Badge color={DUE_HUE[status]}>{cards.length}</Badge>
+      </div>
+
+      <div className="flex flex-col gap-2 overflow-y-auto">
+        {cards.length === 0 ? (
+          <p className="px-1 py-6 text-center text-xs text-muted-foreground">
+            Nothing here.
+          </p>
+        ) : (
+          cards.map((card) => (
+            <DraggableCard
+              key={card.id}
+              card={card}
+              hue={hueFor(card.columnId)}
+              tag={columnNameOf.get(card.id) ?? ""}
+            />
+          ))
+        )}
+      </div>
+
+      {!droppable ? (
+        // Overdue is a source, not a target: a card becomes late on its own, so
+        // there is nothing coherent for a drop here to mean.
+        <p className="px-1 pb-1 text-center text-[11px] text-muted-foreground">
+          Cards arrive here on their own
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function DraggableCard({
+  card,
+  hue,
+  tag,
+}: {
+  card: BoardCard;
+  hue: BadgeColor;
+  tag: string;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: card.id,
+    data: { type: "card" },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ opacity: isDragging ? 0.4 : undefined }}
+      data-testid="board-card"
+      data-card-title={card.title}
+      {...attributes}
+      {...listeners}
+    >
+      <TaskCardShell card={card} hue={hue} tag={tag} showSchedule />
+    </div>
+  );
+}
+
+/** Lane accents: urgency reads as colour without needing to read the heading. */
+const DUE_HUE: Record<DueStatus, BadgeColor> = {
+  overdue: "rose",
+  dueNow: "amber",
+  later: "blue",
+  paused: "slate",
+};
 
 // ── Sortable wrappers ────────────────────────────────────────────────────────
 
@@ -358,11 +589,14 @@ function TaskCardShell({
   hue,
   tag,
   dragging,
+  showSchedule,
 }: {
   card: BoardCard;
   hue: BadgeColor;
   tag: string;
   dragging?: boolean;
+  /** Render the date/pause controls. On in the schedule view, off in columns. */
+  showSchedule?: boolean;
 }) {
   return (
     <Card
@@ -380,9 +614,31 @@ function TaskCardShell({
           </p>
         </CardContent>
       ) : null}
-      <CardContent className="p-0 pt-3">
+      <CardContent className="flex flex-wrap items-center gap-2 p-0 pt-3">
         <Badge color={hue}>{tag}</Badge>
+        {/* A due date is worth seeing in the column view too — it is the reason a
+            card will show up in Overdue tomorrow. */}
+        {card.dueDate ? (
+          <span
+            data-testid="card-due"
+            className="text-xs text-muted-foreground"
+          >
+            Due {dayKeyOfDueDate(card.dueDate)}
+          </span>
+        ) : null}
+        {card.pausedAt ? (
+          <Badge color="slate">Paused</Badge>
+        ) : null}
       </CardContent>
+      {showSchedule && !dragging ? (
+        <CardContent className="p-0 pt-3">
+          <CardSchedule
+            cardId={card.id}
+            dueDate={card.dueDate}
+            paused={Boolean(card.pausedAt)}
+          />
+        </CardContent>
+      ) : null}
     </Card>
   );
 }

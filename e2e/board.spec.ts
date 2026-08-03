@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { gotoReady } from "./helpers";
+import { gotoReady, waitForLanding } from "./helpers";
 
 // End-to-end coverage of the board's core flows against a real dev server and a
 // freshly-seeded database (see playwright.config.ts / global-setup.ts):
@@ -30,6 +30,7 @@ async function login(page: Page): Promise<void> {
   await page.getByLabel("Email").fill(DEMO_EMAIL);
   await page.getByLabel("Password").fill(DEMO_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
+  await waitForLanding(page);
 
   await page
     .getByTestId("board-tile")

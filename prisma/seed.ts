@@ -55,9 +55,26 @@ async function main() {
   // so the board list has something to list.
   type SeedColumn = {
     name: string;
-    cards: { title: string; description?: string }[];
+    cards: {
+      title: string;
+      description?: string;
+      /** Days from today; negative = overdue, 0 = due now, omitted = unscheduled. */
+      dueInDays?: number;
+      paused?: boolean;
+    }[];
   };
   type SeedBoard = { name: string; columns: SeedColumn[] };
+
+  // Due dates are relative to the seed run so the schedule view always has
+  // something in every lane, however long ago the database was seeded.
+  const today = new Date();
+  const dueDateIn = (days: number) => {
+    const date = new Date(
+      Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()),
+    );
+    date.setUTCDate(date.getUTCDate() + days);
+    return date;
+  };
 
   const productRoadmap: SeedColumn[] = [
     {
@@ -66,14 +83,17 @@ async function main() {
         {
           title: "Set up project repository",
           description: "Initialize the repo and push the scaffold.",
+          dueInDays: -3,
         },
         {
           title: "Draft product requirements",
           description: "Capture the MVP scope and acceptance criteria.",
+          dueInDays: 0,
         },
         {
           title: "Design database schema",
           description: "Model users, boards, columns, and cards.",
+          dueInDays: 7,
         },
       ],
     },
@@ -83,10 +103,13 @@ async function main() {
         {
           title: "Build board view",
           description: "Render columns and cards from the database.",
+          dueInDays: -1,
         },
         {
           title: "Wire up credential auth",
           description: "Add Auth.js login and protect board routes.",
+          dueInDays: 14,
+          paused: true,
         },
       ],
     },
@@ -109,13 +132,13 @@ async function main() {
     {
       name: "Backlog",
       cards: [
-        { title: "Audit current pages", description: "Inventory what exists." },
-        { title: "Collect brand assets" },
+        { title: "Audit current pages", description: "Inventory what exists.", dueInDays: -5 },
+        { title: "Collect brand assets", paused: true },
       ],
     },
     {
       name: "In Progress",
-      cards: [{ title: "Rewrite the landing copy" }],
+      cards: [{ title: "Rewrite the landing copy", dueInDays: 0 }],
     },
     { name: "Shipped", cards: [] },
   ];
@@ -141,6 +164,9 @@ async function main() {
                 title: card.title,
                 description: card.description,
                 position: (cardIndex + 1) * POSITION_STEP,
+                dueDate:
+                  card.dueInDays === undefined ? null : dueDateIn(card.dueInDays),
+                pausedAt: card.paused ? today : null,
               })),
             },
           })),
