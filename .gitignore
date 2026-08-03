@@ -30,3 +30,6 @@ target/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# E2E mail outbox (test-only transport, see lib/mailer.ts)
+e2e-outbox.jsonl

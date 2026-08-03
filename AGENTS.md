@@ -67,7 +67,8 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
 - Local development runs Postgres in Docker; see `.env.example` for the
   container and connection strings.
 - Domain models: `User` → `Board` → `Column` → `Card` (single-user Kanban), plus
-  the standalone `AuthAttempt` (rate-limit ledger, see Authentication below).
+  `AuthAttempt` (rate-limit ledger) and `PasswordResetToken` — both described
+  under Authentication below.
   `User` carries credential-auth fields (`email` unique, `passwordHash`).
   `Column`/`Card` ordering uses a `Float position` per sibling set — a row
   dropped between two neighbors takes the midpoint of their positions, so a
@@ -118,6 +119,29 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
   - IP bucketing reads `x-forwarded-for`, which is trustworthy only because every
     supported host overwrites it at the edge. Exposed without such a proxy, the
     header is attacker-controlled and only the per-email rule still holds.
+- **Password reset** (`lib/password-reset.ts` + `lib/actions/password-reset.ts`,
+  pages `/forgot-password` and `/reset-password`, both in `PUBLIC_PATHS`).
+  - Only the SHA-256 *hash* of a token is stored, so a database dump cannot be
+    turned into account takeovers. Tokens last one hour, are single-use, and
+    issuing a new one marks the account's outstanding tokens used.
+  - Redemption is claimed with a conditional `updateMany` on `usedAt: null`, so
+    two concurrent submissions of the same link cannot both succeed.
+  - **No response may reveal whether an account exists.** The request form
+    returns one confirmation either way, every token failure (unknown, expired,
+    spent) returns one message, and reset requests are rate limited for unknown
+    addresses too — counting only real ones would make the limiter an
+    account-existence oracle. Preserve all of this when editing.
+  - Resetting does not sign the user in: holding the link does not prove account
+    ownership until they can also use the new password.
+- **Email** (`lib/mailer.ts`) is a one-method `Mailer` interface with only a
+  console transport; no provider is wired up, and `lib/mailer.ts` documents how
+  to add one. In production without a provider, reset links land in the server
+  log and `getMailer()` warns once. The console transport also mirrors messages
+  to `MAIL_OUTBOX_PATH` when set — a test-only seam the e2e suite uses to read
+  the link it was sent. Nothing sets that variable outside `playwright.config.ts`.
+- `MIN_PASSWORD_LENGTH` lives in `lib/password-policy.ts`, not in an actions
+  module: a `"use server"` file may export only async functions, so a plain
+  constant exported from one is a build error.
 - Login/signup pages are built in the following cards; this card wires only the
   provider, route handler, and route protection.
 
@@ -170,6 +194,9 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
   `test/rate-limit.test.ts` covers `lib/rate-limit.ts` with `@/lib/prisma` and
   `next/headers` mocked (window scoping, the read/record split, retry-time
   reporting, pruning, and `x-forwarded-for` parsing).
+  `test/password-reset.test.ts` covers `lib/password-reset.ts` with `@/lib/prisma`
+  mocked (hash-only storage, expiry, single-use claiming, prior-token
+  invalidation, and identical reporting of every failure mode).
 - **Reorder logic lives in `lib/reorder.ts`** (pure, framework-free) so it is
   testable in isolation; `components/board/board-view.tsx` only wires DnD events
   → `plan*` → optimistic state + persist, and `lib/actions/board.ts` reuses the
@@ -185,9 +212,13 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
   `data-testid` (`board-card` / `board-column`) + `data-card-title` /
   `data-column-name` hooks. Chromium: `npx playwright install chromium`.
   `e2e/rate-limit.spec.ts` drives the login throttle for real (5 generic
-  failures, then refusal — including of the *correct* password). It creates and
-  throttles its own account rather than `demo@example.com`, so it cannot lock out
-  the other specs; keep it that way.
+  failures, then refusal — including of the *correct* password).
+  `e2e/password-reset.spec.ts` runs the whole recovery flow: request a link, read
+  it from the mail outbox, redeem it, confirm the link is then single-use, the
+  old password is dead and the new one works — plus that an unregistered address
+  gets the same confirmation and no mail. Both specs create their own accounts
+  rather than touching `demo@example.com`, so they cannot lock out or mutate what
+  the board specs rely on; keep it that way.
 - **Two timing rules the reorder e2e test depends on**, both of which a networked
   database makes unforgiving: dnd-kit keyboard steps (lift → arrow → drop) must
   each be awaited before the next — the test gates on `aria-pressed` and on

@@ -80,7 +80,7 @@ export function AuthShell({
       </Card>
 
       <p className="text-xs text-muted-foreground">
-        Local-only workspace — your data stays on this machine.
+        Your board, private to your account.
       </p>
     </main>
   );

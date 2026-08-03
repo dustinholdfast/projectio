@@ -1,26 +1,39 @@
 "use client";
 
-import Link from "next/link";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 
-import { login, type AuthActionState } from "@/lib/actions/auth";
+import {
+  requestPasswordReset,
+  type ResetRequestState,
+} from "@/lib/actions/password-reset";
 import { Button, Input, Label } from "@/components/ui";
 
 function SubmitButton() {
   const { pending } = useFormStatus();
   return (
     <Button type="submit" className="w-full" disabled={pending}>
-      {pending ? "Signing in…" : "Sign in"}
+      {pending ? "Sending…" : "Send reset link"}
     </Button>
   );
 }
 
-export function LoginForm() {
-  const [state, formAction] = useActionState<AuthActionState, FormData>(
-    login,
+export function ForgotPasswordForm() {
+  const [state, formAction] = useActionState<ResetRequestState, FormData>(
+    requestPasswordReset,
     undefined,
   );
+
+  // Deliberately the same confirmation whether or not an account exists — the
+  // screen must not reveal which addresses are registered.
+  if (state?.sent) {
+    return (
+      <p role="status" className="text-sm text-muted-foreground">
+        If an account exists for that address, a reset link is on its way. The
+        link is valid for one hour.
+      </p>
+    );
+  }
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
@@ -32,25 +45,6 @@ export function LoginForm() {
           type="email"
           autoComplete="email"
           placeholder="you@example.com"
-          required
-        />
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-baseline justify-between">
-          <Label htmlFor="password">Password</Label>
-          <Link
-            href="/forgot-password"
-            className="text-xs font-medium text-primary hover:underline"
-          >
-            Forgot password?
-          </Link>
-        </div>
-        <Input
-          id="password"
-          name="password"
-          type="password"
-          autoComplete="current-password"
           required
         />
       </div>

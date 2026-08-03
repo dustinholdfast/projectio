@@ -28,7 +28,28 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  boards Board[]
+  boards              Board[]
+  passwordResetTokens PasswordResetToken[]
+}
+
+/// A single-use, expiring credential for the "forgot password" flow.
+///
+/// Only the SHA-256 *hash* of the token is stored: the raw value exists in the
+/// email link and nowhere else, so a leaked database dump cannot be used to
+/// reset anyone's password. Rows are kept after use (`usedAt`) rather than
+/// deleted so a replayed link can be told apart from an unknown one.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Issuing a new token invalidates the account's outstanding ones.
+  @@index([userId])
 }
 
 /// One recorded authentication attempt, used for rate limiting (see

@@ -7,11 +7,11 @@ Written against the code as it stands on 2026-08-03 (Next.js 15.5.22, Prisma
 7.9.1, Auth.js 5.0.0-beta.32).
 
 > **Status: the SQLite → Postgres migration in section 3 has been applied and
-> verified**, and auth rate limiting (§10.3) has been added. Verified locally
-> against Postgres 17.10: migrations apply, the seed runs, `npm run build`
-> succeeds, 41 unit tests pass, and all 4 Playwright end-to-end tests pass
-> (login, card create + persist, keyboard-drag reorder + persist, login
-> throttling).
+> verified**, along with auth rate limiting and password reset (§10.3). Verified
+> locally against Postgres 17.10: migrations apply, the seed runs,
+> `npm run build` succeeds, 61 unit tests pass, and all 6 Playwright end-to-end
+> tests pass (login, card create + persist, keyboard-drag reorder + persist,
+> login throttling, full password recovery, and account-enumeration resistance).
 >
 > What remains before going live is infrastructure, not code: create the Supabase
 > project (§4), set the environment variables (§5), and clear the deployment
@@ -354,6 +354,7 @@ Two practical warnings:
 | `AUTH_SECRET` | Yes | 32+ random bytes | `npx auth secret` or `openssl rand -base64 32`. Signs the session JWT; rotating it logs everyone out. |
 | `AUTH_TRUST_HOST` | Non-Vercel hosts | `true` | Auth.js v5 rejects proxied host headers without it. Not needed on Vercel. |
 | `DB_POOL_MAX` | No | `5` (server), `2` (serverless) | Added in 3.3. |
+| `APP_URL` | No | `https://board.example.com` | Base URL for links in outbound email. Derived from the request headers when unset, which is correct on every host here; set it only when the public URL differs from what the proxy forwards. |
 | `NODE_ENV` | Auto | `production` | Set by `next start` / the platform. |
 
 The database password is inside the connection string — treat both URLs as
@@ -559,7 +560,11 @@ On the live URL:
    return "Too many attempts" rather than "Invalid email or password" — this
    confirms the limiter sees a real client IP through your host's proxy, which is
    the part that cannot be verified locally.
-10. In the Supabase dashboard, check **Database → Roles/Connections** for
+10. Request a password reset. Until you wire up an email provider (§10.3) the
+    link appears in your host's **server logs**, not an inbox — check there, open
+    it, and confirm the new password works and the link is refused on reuse. The
+    link's host must be your real domain; if it is not, set `APP_URL`.
+11. In the Supabase dashboard, check **Database → Roles/Connections** for
     connection count under normal use. If it is near the ceiling at low traffic,
     lower `DB_POOL_MAX`.
 
@@ -626,12 +631,28 @@ session and walks the board relationship before writing, so a forged id cannot
 touch another account's data. This is what makes the RLS measure in §10.2
 belt-and-braces rather than load-bearing.
 
+**Password reset — DONE, with one thing left for you.** The full flow works:
+`/forgot-password` → emailed link → `/reset-password` → sign in. Tokens are
+stored only as SHA-256 hashes, expire after an hour, are single-use, and are
+invalidated when a newer one is issued. No response reveals whether an account
+exists — the request form answers identically either way, every token failure
+returns one message, and requests for unregistered addresses are rate limited
+too, so the limiter cannot be used as an existence oracle. Verified end to end in
+`e2e/password-reset.spec.ts`.
+
+**The one thing left: wire up an email provider.** `lib/mailer.ts` is a
+one-method interface with only a console transport, so reset links currently go
+to the *server log* rather than a user's inbox. That is fine for staging and
+makes the flow fully testable, but it is not account recovery for real users —
+and anyone with log access can take over an account that requests a reset. The
+file documents exactly what to implement (a Resend example is included); it
+warns once at runtime in production so the state is visible rather than silent.
+Do this before inviting anyone who is not you.
+
 **Still open:**
 
-- **No password reset and no email verification.** A forgotten password means
-  manual database surgery, and anyone can sign up with any address. Both need an
-  email provider (Resend, Postmark, SES) — an infrastructure decision and a set
-  of credentials, which is why they are not done here.
+- **No email verification.** Anyone can sign up with any address, including one
+  they do not control. Needs the same email provider.
 - **No audit logging.** `AuthAttempt` records failures for throttling but is
   pruned, so it is not an audit trail.
 

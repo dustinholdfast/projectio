@@ -1,4 +1,7 @@
 import { execSync } from "node:child_process";
+import { rmSync } from "node:fs";
+
+import { MAIL_OUTBOX_PATH } from "../playwright.config";
 
 // Reset the e2e database to the deterministic seed state (demo user + "Product
 // Roadmap" board) before the suite runs. `prisma migrate reset` drops every
@@ -36,4 +39,8 @@ export default async function globalSetup() {
   execSync("npx prisma generate", { stdio: "inherit", env });
   execSync("npx prisma migrate reset --force", { stdio: "inherit", env });
   execSync("npx tsx prisma/seed.ts", { stdio: "inherit", env });
+
+  // Start each run with an empty outbox so the password-reset spec cannot read a
+  // link left behind by a previous run.
+  rmSync(MAIL_OUTBOX_PATH, { force: true });
 }

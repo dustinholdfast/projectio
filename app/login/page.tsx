@@ -3,7 +3,15 @@ import Link from "next/link";
 import { AuthShell } from "@/components/auth-shell";
 import { LoginForm } from "./login-form";
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ reset?: string }>;
+}) {
+  // Set by the password-reset action on success, so the user gets confirmation
+  // that the change took effect rather than an unexplained sign-in screen.
+  const { reset } = await searchParams;
+
   return (
     <AuthShell
       eyebrow="Welcome back"
@@ -21,6 +29,11 @@ export default function LoginPage() {
         </p>
       }
     >
+      {reset ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          Your password has been changed. Sign in with your new password.
+        </p>
+      ) : null}
       <LoginForm />
     </AuthShell>
   );

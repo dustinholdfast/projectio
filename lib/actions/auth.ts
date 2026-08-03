@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 
 import { prisma } from "@/lib/prisma";
 import { signIn, signOut } from "@/lib/auth";
+import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
 import {
   LOGIN_EMAIL_RULE,
   LOGIN_IP_RULE,
@@ -24,7 +25,6 @@ import {
 // initial (no-error) state; a populated `error` is rendered under the form.
 export type AuthActionState = { error: string } | undefined;
 
-const MIN_PASSWORD_LENGTH = 8;
 
 // Deliberately permissive: real validation is the server-side uniqueness check
 // and the credentials `authorize` step. This just catches obvious typos early.

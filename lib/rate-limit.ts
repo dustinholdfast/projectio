@@ -38,6 +38,21 @@ export const LOGIN_EMAIL_RULE: RateLimitRule = { limit: 5, windowMs: 15 * MINUTE
 /** Account creations from one IP, to stop bulk signup abuse. */
 export const SIGNUP_IP_RULE: RateLimitRule = { limit: 5, windowMs: 60 * MINUTE };
 
+/**
+ * Password-reset requests from one IP. Each one sends mail, so this caps both
+ * mailbox-flooding of a victim and burning through a mail provider's quota.
+ */
+export const RESET_REQUEST_IP_RULE: RateLimitRule = {
+  limit: 5,
+  windowMs: 60 * MINUTE,
+};
+
+/** Password-reset requests for one address, regardless of origin. */
+export const RESET_REQUEST_EMAIL_RULE: RateLimitRule = {
+  limit: 3,
+  windowMs: 60 * MINUTE,
+};
+
 export type RateLimitVerdict =
   | { allowed: true }
   | { allowed: false; retryAfterMs: number };

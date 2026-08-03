@@ -13,7 +13,14 @@ import type { NextAuthConfig } from "next-auth";
 // Auth.js API routes (`/api/auth/*`) are always allowed by the library itself.
 // `/api/health` is included so platform health checks are not redirected to the
 // sign-in page. It exposes only a liveness status, never data.
-const PUBLIC_PATHS = ["/login", "/signup", "/api/health"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/signup",
+  "/api/health",
+  // Account recovery is by definition reachable without a session.
+  "/forgot-password",
+  "/reset-password",
+];
 
 function isPublicPath(pathname: string): boolean {
   // `/design` is the internal design-system preview. It is public outside
