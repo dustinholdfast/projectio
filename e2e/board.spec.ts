@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { gotoReady } from "./helpers";
 
 // End-to-end coverage of the board's core flows against a real dev server and a
 // freshly-seeded database (see playwright.config.ts / global-setup.ts):
@@ -17,12 +18,25 @@ const TODO_CARDS = [
   "Design database schema",
 ];
 
-async function login(page: Page) {
-  await page.goto("/login");
+/**
+ * Sign in and open the seeded "Product Roadmap" board.
+ *
+ * Login lands on the board *list*, so these specs go through it. Afterwards the
+ * page sits on /board/[id], which is what makes the plain `page.reload()` calls
+ * below still land on the board.
+ */
+async function login(page: Page): Promise<void> {
+  await gotoReady(page, "/login");
   await page.getByLabel("Email").fill(DEMO_EMAIL);
   await page.getByLabel("Password").fill(DEMO_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
-  // The board is the app root; wait until a seeded column renders.
+
+  await page
+    .getByTestId("board-tile")
+    .filter({ hasText: "Product Roadmap" })
+    .click();
+
+  await expect(page).toHaveURL(/\/board\/[^/]+$/);
   await expect(
     page.getByRole("heading", { name: "To Do", exact: true }),
   ).toBeVisible();

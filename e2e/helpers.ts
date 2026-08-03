@@ -1,0 +1,22 @@
+import type { Page } from "@playwright/test";
+
+/**
+ * Navigate to `path` and wait until the page is actually interactive.
+ *
+ * `next dev` compiles routes on demand, so the first visit to one serves HTML
+ * well before its JavaScript is ready. A click that lands in that window is
+ * silently lost: the form submits natively, without the header Next needs to
+ * recognise a server action, so the action never runs and the page simply
+ * re-renders unchanged — no error, no navigation.
+ *
+ * Only the first test to reach a route pays this, which made it look like a flake
+ * confined to whichever spec happened to run first. Waiting for the network to
+ * settle waits for hydration and removes the race.
+ *
+ * In production this window is far smaller (nothing is compiled on demand), but
+ * it is not zero — see AGENTS.md.
+ */
+export async function gotoReady(page: Page, path: string): Promise<void> {
+  await page.goto(path);
+  await page.waitForLoadState("networkidle");
+}

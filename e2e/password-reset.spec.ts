@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 
 import { MAIL_OUTBOX_PATH } from "../playwright.config";
+import { gotoReady } from "./helpers";
 
 // End-to-end coverage of account recovery: request a link, redeem it, and sign
 // in with the new password. The link is read from the mail outbox the console
@@ -39,7 +40,7 @@ test("resets a forgotten password and signs in with the new one", async ({
   page,
 }) => {
   // Create the account to recover, then drop its session.
-  await page.goto("/signup");
+  await gotoReady(page, "/signup");
   await page.getByLabel("Email").fill(EMAIL);
   await page.getByLabel("Password").fill(OLD_PASSWORD);
   await page.getByRole("button", { name: "Create account" }).click();
@@ -47,7 +48,7 @@ test("resets a forgotten password and signs in with the new one", async ({
   await page.context().clearCookies();
 
   // Request a link from the login page's entry point.
-  await page.goto("/login");
+  await gotoReady(page, "/login");
   await page.getByRole("link", { name: "Forgot password?" }).click();
   await expect(page).toHaveURL(/\/forgot-password$/);
   await page.getByLabel("Email").fill(EMAIL);
@@ -61,7 +62,7 @@ test("resets a forgotten password and signs in with the new one", async ({
   const link = resetLinkFrom(lastMailTo(EMAIL)!.text);
 
   // Redeem it.
-  await page.goto(link);
+  await gotoReady(page, link);
   await expect(page.getByText("Choose a new password")).toBeVisible();
   // Exact, or "New password" also matches "Confirm new password".
   await page.getByLabel("New password", { exact: true }).fill(NEW_PASSWORD);
@@ -73,14 +74,14 @@ test("resets a forgotten password and signs in with the new one", async ({
   await expect(page.getByRole("status")).toContainText(/password has been changed/i);
 
   // The link is single-use: going back to it must now be refused.
-  await page.goto(link);
+  await gotoReady(page, link);
   await expect(page.getByRole("alert").first()).toContainText(
     /invalid or has expired/i,
   );
 
   // The old password no longer works. Scoped to the form: Next's dev overlay
   // also exposes a role="alert" node.
-  await page.goto("/login");
+  await gotoReady(page, "/login");
   await page.getByLabel("Email").fill(EMAIL);
   await page.getByLabel("Password").fill(OLD_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -89,7 +90,7 @@ test("resets a forgotten password and signs in with the new one", async ({
   );
 
   // ...and the new one does.
-  await page.goto("/login");
+  await gotoReady(page, "/login");
   await page.getByLabel("Email").fill(EMAIL);
   await page.getByLabel("Password").fill(NEW_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -97,7 +98,7 @@ test("resets a forgotten password and signs in with the new one", async ({
 });
 
 test("does not reveal whether an address has an account", async ({ page }) => {
-  await page.goto("/forgot-password");
+  await gotoReady(page, "/forgot-password");
   await page.getByLabel("Email").fill("definitely-not-registered@example.com");
   await page.getByRole("button", { name: "Send reset link" }).click();
 

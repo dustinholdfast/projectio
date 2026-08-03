@@ -1,4 +1,4 @@
-# TestProject
+# Project/IO
 
 Project conventions and context for AI coding agents.
 
@@ -145,27 +145,35 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
 - Login/signup pages are built in the following cards; this card wires only the
   provider, route handler, and route protection.
 
-## Board view
+## Boards
 
-- The board is the app root `/` (`app/page.tsx`) — a protected Server Component
-  and the post-login/signup landing route. It loads the signed-in user's board
-  via `getCurrentUserBoard()` (`lib/board.ts`), which scopes to `session.user.id`
-  and returns columns (ordered by `position` asc = left→right) each with their
-  cards (`position` asc = top→bottom). Returns `null` when the user has no board
-  (e.g. a fresh signup) — the page then shows an empty state to create one.
-- Mutations are server actions in `lib/actions/board.ts`: `createBoard`,
-  `createColumn`, `createCard`. Each re-reads the session, verifies the target
-  (board, or column→board) belongs to the current user before writing, appends
-  the new sibling at `max(position) + 1000`, and `revalidatePath("/")`. They
-  return a `{ error }` state for inline display.
-- Inline create UIs are client components in `components/board/`
-  (`add-card-form`, `add-column-form`, `create-board-form`). They compose the
-  `@/components/ui` primitives and call the actions; card/column editors use
-  `useTransition` so they clear/close on success. `signOutAction`
-  (`lib/actions/auth.ts`) backs the header's sign-out button.
-- This card built structure + behavior with minimal styling; drag-drop
-  reordering (`@dnd-kit`), reorder persistence, and the final restyle are
-  separate downstream cards in this phase.
+- **Two screens.** `/` (`app/page.tsx`) lists every board the user owns;
+  `/board/[id]` (`app/board/[id]/page.tsx`) is one board. Both are protected
+  Server Components. `/` is the post-login/signup landing route.
+- `getUserBoards()` (`lib/board.ts`) returns summaries ordered by `updatedAt`
+  desc, with column/card totals from `_count` aggregates rather than by loading
+  every card. `getBoardForUser(id)` returns one board with columns (`position`
+  asc = left→right) each with their cards (`position` asc = top→bottom).
+- **Ownership is part of the query, not a check on the result.**
+  `getBoardForUser` filters on `{ id, ownerId }`, so another account's board is
+  indistinguishable from a missing one and the page `notFound()`s either way — it
+  must never confirm that someone else's board exists. `renameBoard` and
+  `deleteBoard` use `updateMany`/`deleteMany` scoped by `ownerId` for the same
+  reason: a forged id matches zero rows instead of hitting another user's data.
+- Mutations are server actions in `lib/actions/board.ts`: `createBoard` (creates
+  then `redirect`s into the new board), `renameBoard`, `deleteBoard` (cascades to
+  columns and cards; the UI confirms first), `createColumn`, `createCard`, and
+  the two reorder actions. Board names are trimmed and capped at 80 chars.
+- **Revalidate through `revalidateBoard(boardId)`**, which refreshes both
+  `/board/[id]` and `/` — the list shows per-board counts, so a card write
+  changes it too. Do not reintroduce a bare `revalidatePath("/")`.
+- Inline UIs are client components in `components/board/` (`add-card-form`,
+  `add-column-form`, `create-board-form`, `board-settings`). They compose the
+  `@/components/ui` primitives and call the actions; editors use `useTransition`
+  and close only once the action returns without an error. `AppHeader`
+  (`components/app-header.tsx`) is the shared signed-in chrome and carries the
+  wordmark, which links back to the list. `signOutAction` (`lib/actions/auth.ts`)
+  backs its sign-out button.
 
 ## Commands
 
@@ -219,6 +227,19 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
   gets the same confirmation and no mail. Both specs create their own accounts
   rather than touching `demo@example.com`, so they cannot lock out or mutate what
   the board specs rely on; keep it that way.
+  `e2e/boards.spec.ts` covers the list, create → rename → delete, and the
+  cross-account boundary (another user's board URL must 404).
+- **Navigate with `gotoReady()` (`e2e/helpers.ts`), not `page.goto()`, whenever a
+  click follows.** `next dev` compiles routes on demand and serves HTML before
+  the JavaScript is ready; a click landing in that window submits the form
+  natively, without the header Next needs to recognise a server action, so the
+  action never runs and the page re-renders unchanged — no error, no navigation,
+  just a test that times out much later on something unrelated. Only the first
+  test to reach a route pays it, which makes it look like a flake belonging to
+  whichever spec runs first.
+- Assertions on inline errors should scope to the form
+  (`page.locator("form").getByRole("alert")`): Next's dev overlay also exposes a
+  `role="alert"` node, so an unscoped query hits a strict-mode violation.
 - **Two timing rules the reorder e2e test depends on**, both of which a networked
   database makes unforgiving: dnd-kit keyboard steps (lift → arrow → drop) must
   each be awaited before the next — the test gates on `aria-pressed` and on

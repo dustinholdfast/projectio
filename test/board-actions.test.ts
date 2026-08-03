@@ -1,27 +1,50 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Integration tests for the reorder server actions. Prisma and the session are
-// mocked so we can assert the ownership walk, cross-board rejection, neighbor
-// scoping, and the single-row midpoint write without a real database.
-const { authMock, prismaMock, revalidateMock } = vi.hoisted(() => ({
+// Integration tests for the board server actions. Prisma, the session, and the
+// Next cache/navigation helpers are mocked so we can assert the ownership walk,
+// cross-board rejection, neighbor scoping, and the single-row midpoint write
+// without a real database.
+const { authMock, prismaMock, revalidateMock, redirectMock } = vi.hoisted(() => ({
   authMock: vi.fn(),
   prismaMock: {
     card: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
     column: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+    board: { updateMany: vi.fn(), deleteMany: vi.fn() },
   },
   revalidateMock: vi.fn(),
+  // `redirect` throws in Next so control never returns; mirror that here or the
+  // actions under test would carry on past it.
+  redirectMock: vi.fn((path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  }),
 }));
 
 vi.mock("@/lib/auth", () => ({ auth: authMock }));
 vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 vi.mock("next/cache", () => ({ revalidatePath: revalidateMock }));
+vi.mock("next/navigation", () => ({ redirect: redirectMock }));
 
-import { reorderCard, reorderColumn } from "@/lib/actions/board";
+import {
+  deleteBoard,
+  renameBoard,
+  reorderCard,
+  reorderColumn,
+} from "@/lib/actions/board";
 
 const USER = "u1";
 
+/** Build the FormData a board action receives from its form. */
+function form(fields: Record<string, string>): FormData {
+  const data = new FormData();
+  for (const [key, value] of Object.entries(fields)) data.append(key, value);
+  return data;
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
+  redirectMock.mockImplementation((path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  });
   authMock.mockResolvedValue({ user: { id: USER } });
   prismaMock.card.update.mockResolvedValue({});
   prismaMock.column.update.mockResolvedValue({});
@@ -54,6 +77,8 @@ describe("reorderCard", () => {
       where: { id: "cX" },
       data: { columnId: "col2", position: 1500 },
     });
+    // Both routes: the board itself, and the list, whose counts it feeds.
+    expect(revalidateMock).toHaveBeenCalledWith("/board/b1");
     expect(revalidateMock).toHaveBeenCalledWith("/");
   });
 
@@ -198,5 +223,82 @@ describe("reorderColumn", () => {
 
     expect(result).toEqual({ error: "Column not found." });
     expect(prismaMock.column.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("renameBoard", () => {
+  it("scopes the update by owner, so a forged id matches nothing", async () => {
+    prismaMock.board.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await renameBoard(undefined, form({ boardId: "b1", name: "Q3 Plan" }));
+
+    expect(result).toBeUndefined();
+    expect(prismaMock.board.updateMany).toHaveBeenCalledWith({
+      where: { id: "b1", ownerId: USER },
+      data: { name: "Q3 Plan" },
+    });
+    expect(revalidateMock).toHaveBeenCalledWith("/board/b1");
+    expect(revalidateMock).toHaveBeenCalledWith("/");
+  });
+
+  it("reports not-found when the scoped update matched no rows", async () => {
+    // What a board owned by someone else looks like from here.
+    prismaMock.board.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await renameBoard(undefined, form({ boardId: "bX", name: "Mine now" }));
+
+    expect(result).toEqual({ error: "Board not found." });
+    expect(revalidateMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a blank name without writing", async () => {
+    const result = await renameBoard(undefined, form({ boardId: "b1", name: "   " }));
+
+    expect(result).toEqual({ error: "Enter a name for your board." });
+    expect(prismaMock.board.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("trims and caps an over-long name rather than rejecting it", async () => {
+    prismaMock.board.updateMany.mockResolvedValue({ count: 1 });
+
+    await renameBoard(undefined, form({ boardId: "b1", name: `  ${"x".repeat(200)}  ` }));
+
+    const { name } = prismaMock.board.updateMany.mock.calls[0][0].data;
+    expect(name).toHaveLength(80);
+  });
+
+  it("refuses without a session", async () => {
+    authMock.mockResolvedValue(null);
+
+    const result = await renameBoard(undefined, form({ boardId: "b1", name: "Nope" }));
+
+    expect(result).toEqual({
+      error: "Your session has expired. Please sign in again.",
+    });
+    expect(prismaMock.board.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("deleteBoard", () => {
+  it("deletes only a board the session user owns, then returns to the list", async () => {
+    prismaMock.board.deleteMany.mockResolvedValue({ count: 1 });
+
+    await expect(deleteBoard(form({ boardId: "b1" }))).rejects.toThrow(
+      "NEXT_REDIRECT:/",
+    );
+
+    expect(prismaMock.board.deleteMany).toHaveBeenCalledWith({
+      where: { id: "b1", ownerId: USER },
+    });
+  });
+
+  it("sends an unauthenticated caller to login without deleting", async () => {
+    authMock.mockResolvedValue(null);
+
+    await expect(deleteBoard(form({ boardId: "b1" }))).rejects.toThrow(
+      "NEXT_REDIRECT:/login",
+    );
+
+    expect(prismaMock.board.deleteMany).not.toHaveBeenCalled();
   });
 });

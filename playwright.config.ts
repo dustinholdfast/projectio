@@ -21,7 +21,10 @@ export const MAIL_OUTBOX_PATH = "e2e-outbox.jsonl";
 export default defineConfig({
   testDir: "./e2e",
   globalSetup: "./e2e/global-setup.ts",
-  timeout: 45_000,
+  // Generous, because the server under test is `next dev`: the first test to
+  // reach a route pays for compiling it on demand, which on a cold run is far
+  // slower than anything the assertions themselves wait for.
+  timeout: 90_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
   workers: 1,

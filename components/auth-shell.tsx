@@ -33,7 +33,7 @@ function BrandMark() {
           <rect x="16" y="4" width="5" height="13" rx="1.5" fill="currentColor" />
         </svg>
       </span>
-      <span className="text-base font-semibold tracking-tight">TestProject</span>
+      <span className="text-base font-semibold tracking-tight">Project/IO</span>
     </Link>
   );
 }

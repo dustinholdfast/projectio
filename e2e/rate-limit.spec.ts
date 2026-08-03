@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { gotoReady } from "./helpers";
 
 // Verifies the credential rate limiter end to end against a real server and
 // database: repeated bad passwords for one account must stop being answered with
@@ -16,7 +17,7 @@ const PASSWORD = "correct-horse-battery";
 test("throttles repeated failed logins for one account", async ({ page }) => {
   // Create the target account, then drop the session it hands back so the
   // sign-in form is reachable again.
-  await page.goto("/signup");
+  await gotoReady(page, "/signup");
   await page.getByLabel("Email").fill(EMAIL);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: /Create account|Sign up/i }).click();
@@ -27,7 +28,7 @@ test("throttles repeated failed logins for one account", async ({ page }) => {
   // visible a beat before React fills it, so a plain textContent() read races
   // and returns "".
   const attempt = async (password: string, expected: RegExp) => {
-    await page.goto("/login");
+    await gotoReady(page, "/login");
     await page.getByLabel("Email").fill(EMAIL);
     await page.getByLabel("Password").fill(password);
     await page.getByRole("button", { name: "Sign in" }).click();

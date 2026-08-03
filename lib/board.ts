@@ -1,32 +1,75 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-// Read helpers for the board view. Ownership is scoped to the session user so a
-// board is only ever loaded for the account that owns it. Columns and cards are
-// returned already ordered by their `position` Float (ascending = left-to-right
-// for columns, top-to-bottom for cards) so the view renders them in order
-// without sorting client-side.
+// Read helpers for the board screens. Every query is scoped to the session user,
+// so a board is only ever loaded for the account that owns it — an unowned id and
+// an unknown one are indistinguishable, and the caller 404s either way rather
+// than confirming that someone else's board exists.
+//
+// Columns and cards come back already ordered by their `position` Float
+// (ascending = left-to-right for columns, top-to-bottom for cards) so the view
+// renders them in order without sorting client-side.
 
 export type BoardWithColumns = NonNullable<
-  Awaited<ReturnType<typeof getCurrentUserBoard>>
+  Awaited<ReturnType<typeof getBoardForUser>>
 >;
 export type ColumnWithCards = BoardWithColumns["columns"][number];
 export type BoardCard = ColumnWithCards["cards"][number];
 
+export type BoardSummary = {
+  id: string;
+  name: string;
+  updatedAt: Date;
+  columnCount: number;
+  cardCount: number;
+};
+
 /**
- * Load the signed-in user's board (their first, by creation order) with its
- * columns and cards ordered by `position`. Returns `null` when there is no
- * session or the user has no board yet (new signups) — the caller renders an
- * empty state that lets them create their first board.
+ * Every board owned by the signed-in user, most recently touched first, with the
+ * counts the list screen shows.
+ *
+ * Counts come from `_count` aggregates rather than loading the cards themselves:
+ * the list needs totals only, and a user with large boards should not pay to
+ * fetch every card just to render a summary line.
  */
-export async function getCurrentUserBoard() {
+export async function getUserBoards(): Promise<BoardSummary[]> {
+  const session = await auth();
+  const userId = session?.user?.id;
+  if (!userId) return [];
+
+  const boards = await prisma.board.findMany({
+    where: { ownerId: userId },
+    orderBy: { updatedAt: "desc" },
+    select: {
+      id: true,
+      name: true,
+      updatedAt: true,
+      columns: { select: { _count: { select: { cards: true } } } },
+    },
+  });
+
+  return boards.map((board) => ({
+    id: board.id,
+    name: board.name,
+    updatedAt: board.updatedAt,
+    columnCount: board.columns.length,
+    cardCount: board.columns.reduce((sum, column) => sum + column._count.cards, 0),
+  }));
+}
+
+/**
+ * One board with its columns and cards, or `null` when there is no session or
+ * the board does not exist / belongs to someone else. The ownership filter is
+ * part of the query rather than a check applied to the result, so there is no
+ * window in which another account's board has been loaded.
+ */
+export async function getBoardForUser(boardId: string) {
   const session = await auth();
   const userId = session?.user?.id;
   if (!userId) return null;
 
   return prisma.board.findFirst({
-    where: { ownerId: userId },
-    orderBy: { createdAt: "asc" },
+    where: { id: boardId, ownerId: userId },
     include: {
       columns: {
         orderBy: { position: "asc" },

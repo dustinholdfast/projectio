@@ -1,17 +1,19 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { POSITION_STEP, midpointPosition } from "@/lib/reorder";
 
-// Server actions backing the board view: create a board, a column, or a card.
-// Every action re-reads the session and verifies the target belongs to the
-// current user before writing, so a forged id can never mutate another account's
-// data. Ordering uses the `position` Float scheme (see prisma/schema.prisma): a
-// new sibling is appended by taking the current max position plus a fixed step,
-// leaving room for a later drag-drop insert to take a midpoint between neighbors.
+// Server actions backing the board screens: create/rename/delete a board, and
+// add columns and cards to one. Every action re-reads the session and verifies
+// the target belongs to the current user before writing, so a forged id can
+// never mutate another account's data. Ordering uses the `position` Float scheme
+// (see prisma/schema.prisma): a new sibling is appended by taking the current max
+// position plus a fixed step, leaving room for a later drag-drop insert to take a
+// midpoint between neighbors.
 
 // Shape returned to the client forms via `useActionState`. `undefined` is the
 // initial (no-error) state; a populated `error` is rendered under the form. The
@@ -24,7 +26,25 @@ async function requireUserId(): Promise<string | null> {
   return session?.user?.id ?? null;
 }
 
-/** Create the user's first board and reload the view. */
+/**
+ * Refresh both views a board write can affect: the board itself, and the list,
+ * whose per-board column/card counts change with it.
+ */
+function revalidateBoard(boardId: string): void {
+  revalidatePath(`/board/${boardId}`);
+  revalidatePath("/");
+}
+
+/** Longest accepted board name — enough for a real title, short enough to render. */
+const MAX_BOARD_NAME = 80;
+
+function readBoardName(formData: FormData): string {
+  return String(formData.get("name") ?? "")
+    .trim()
+    .slice(0, MAX_BOARD_NAME);
+}
+
+/** Create a board and open it. */
 export async function createBoard(
   _prevState: BoardActionState,
   formData: FormData,
@@ -32,14 +52,61 @@ export async function createBoard(
   const userId = await requireUserId();
   if (!userId) return { error: "Your session has expired. Please sign in again." };
 
-  const name = String(formData.get("name") ?? "").trim();
+  const name = readBoardName(formData);
   if (!name) return { error: "Enter a name for your board." };
 
-  await prisma.board.create({
+  const board = await prisma.board.create({
     data: { name, ownerId: userId },
+    select: { id: true },
   });
 
   revalidatePath("/");
+  // Straight into the new board — creating one and then having to find it in the
+  // list would be a pointless extra step.
+  redirect(`/board/${board.id}`);
+}
+
+/** Rename a board the current user owns. */
+export async function renameBoard(
+  _prevState: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> {
+  const userId = await requireUserId();
+  if (!userId) return { error: "Your session has expired. Please sign in again." };
+
+  const boardId = String(formData.get("boardId") ?? "");
+  const name = readBoardName(formData);
+  if (!boardId) return { error: "Missing board." };
+  if (!name) return { error: "Enter a name for your board." };
+
+  // Scoping the update by ownerId means a forged boardId matches zero rows
+  // rather than renaming someone else's board.
+  const result = await prisma.board.updateMany({
+    where: { id: boardId, ownerId: userId },
+    data: { name },
+  });
+  if (result.count === 0) return { error: "Board not found." };
+
+  revalidateBoard(boardId);
+}
+
+/**
+ * Delete a board the current user owns, and return to the list.
+ *
+ * Columns and cards go with it via the schema's cascade — there is no separate
+ * cleanup, and no way to recover it, which is why the UI confirms first.
+ */
+export async function deleteBoard(formData: FormData): Promise<void> {
+  const userId = await requireUserId();
+  if (!userId) redirect("/login");
+
+  const boardId = String(formData.get("boardId") ?? "");
+  if (boardId) {
+    await prisma.board.deleteMany({ where: { id: boardId, ownerId: userId } });
+  }
+
+  revalidatePath("/");
+  redirect("/");
 }
 
 /** Append a new column to a board the current user owns. */
@@ -78,7 +145,7 @@ export async function createColumn(
     },
   });
 
-  revalidatePath("/");
+  revalidateBoard(boardId);
 }
 
 /** Append a new card to a column whose board the current user owns. */
@@ -95,10 +162,11 @@ export async function createCard(
   if (!columnId) return { error: "Missing column." };
   if (!title) return { error: "Enter a card title." };
 
-  // Ownership check: walk column → board → owner in one query.
+  // Ownership check: walk column → board → owner in one query. `boardId` comes
+  // back too, so the revalidation below can target this board's route.
   const column = await prisma.column.findUnique({
     where: { id: columnId },
-    select: { board: { select: { ownerId: true } } },
+    select: { boardId: true, board: { select: { ownerId: true } } },
   });
   if (!column || column.board.ownerId !== userId) {
     return { error: "Column not found." };
@@ -119,7 +187,7 @@ export async function createCard(
     },
   });
 
-  revalidatePath("/");
+  revalidateBoard(column.boardId);
 }
 
 // ── Drag-drop reordering ────────────────────────────────────────────────────
@@ -175,7 +243,7 @@ export async function reorderColumn(input: {
     data: { position: midpointPosition(prev?.position, next?.position) },
   });
 
-  revalidatePath("/");
+  revalidateBoard(column.boardId);
 }
 
 /**
@@ -239,5 +307,5 @@ export async function reorderCard(input: {
     },
   });
 
-  revalidatePath("/");
+  revalidateBoard(toColumn.boardId);
 }

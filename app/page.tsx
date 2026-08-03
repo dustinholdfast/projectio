@@ -1,54 +1,83 @@
-import { Button, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { BoardView } from "@/components/board/board-view";
+import Link from "next/link";
+
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { AppHeader } from "@/components/app-header";
 import { CreateBoardForm } from "@/components/board/create-board-form";
-import { signOutAction } from "@/lib/actions/auth";
-import { getCurrentUserBoard } from "@/lib/board";
+import { getUserBoards, type BoardSummary } from "@/lib/board";
 
-// The board view. A protected route (see middleware.ts) rendered at "/", where
-// login/signup redirect on success. This server component fetches the signed-in
-// user's board (columns and cards already in `position` order) and hands it to
-// the client <BoardView>, which renders the columns/cards and owns the @dnd-kit
-// drag-drop reordering. Presentation follows the "Calm Focus" direction; the hue
-// mapping lives alongside the board rendering in board-view.tsx.
+// The board list — the app root, and where login/signup land. A protected route
+// (see middleware.ts). This server component fetches every board the signed-in
+// user owns, with column/card counts, and links each one to /board/[id].
+// Presentation follows the "Calm Focus" direction.
 
-export default async function BoardPage() {
-  const board = await getCurrentUserBoard();
+export default async function BoardsPage() {
+  const boards = await getUserBoards();
 
   return (
     <main className="flex min-h-screen flex-col bg-background text-foreground">
-      <BoardHeader boardName={board?.name ?? null} />
-      {board ? <BoardView board={board} /> : <EmptyState />}
+      <AppHeader
+        title="Your boards"
+        subtitle={
+          boards.length
+            ? `${boards.length} board${boards.length === 1 ? "" : "s"}`
+            : undefined
+        }
+      />
+
+      <section className="mx-auto w-full max-w-5xl flex-1 p-4 sm:p-6">
+        {boards.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="flex flex-col gap-8">
+            <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {boards.map((board) => (
+                <li key={board.id}>
+                  <BoardTile board={board} />
+                </li>
+              ))}
+            </ul>
+
+            <Card className="w-full max-w-sm shadow-md">
+              <CardHeader className="gap-1 p-6 pb-4">
+                <CardTitle className="text-base">New board</CardTitle>
+              </CardHeader>
+              <CardContent className="p-6 pt-0">
+                <CreateBoardForm />
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </section>
     </main>
   );
 }
 
-function BoardHeader({ boardName }: { boardName: string | null }) {
+function BoardTile({ board }: { board: BoardSummary }) {
   return (
-    <header className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-border bg-surface/95 px-4 py-3 backdrop-blur sm:px-6">
-      <div className="flex flex-col">
-        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          TestProject
-        </span>
-        <h1 className="text-base font-semibold tracking-tight">
-          {boardName ?? "Your board"}
-        </h1>
-      </div>
-      <div className="flex items-center gap-2">
-        <ThemeToggle />
-        <form action={signOutAction}>
-          <Button type="submit" variant="outline">
-            Sign out
-          </Button>
-        </form>
-      </div>
-    </header>
+    <Link
+      href={`/board/${board.id}`}
+      data-testid="board-tile"
+      data-board-name={board.name}
+      className="block h-full rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+    >
+      <Card className="h-full shadow-sm transition-shadow hover:shadow-md">
+        <CardHeader className="gap-1 p-5 pb-3">
+          <CardTitle className="truncate text-base">{board.name}</CardTitle>
+        </CardHeader>
+        <CardContent className="p-5 pt-0">
+          <p className="text-sm text-muted-foreground">
+            {board.columnCount} column{board.columnCount === 1 ? "" : "s"} ·{" "}
+            {board.cardCount} card{board.cardCount === 1 ? "" : "s"}
+          </p>
+        </CardContent>
+      </Card>
+    </Link>
   );
 }
 
 function EmptyState() {
   return (
-    <section className="flex flex-1 items-center justify-center p-6">
+    <div className="flex flex-1 items-center justify-center py-16">
       <Card className="w-full max-w-sm shadow-md">
         <CardHeader className="gap-2 p-6 pb-4">
           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -60,6 +89,6 @@ function EmptyState() {
           <CreateBoardForm />
         </CardContent>
       </Card>
-    </section>
+    </div>
   );
 }

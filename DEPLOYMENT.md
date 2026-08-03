@@ -1,4 +1,4 @@
-# Deployment Guide — Supabase Postgres
+# Project/IO — Deployment Guide
 
 How to migrate this app off SQLite onto Supabase, then get it onto real web
 hosting.
@@ -7,11 +7,12 @@ Written against the code as it stands on 2026-08-03 (Next.js 15.5.22, Prisma
 7.9.1, Auth.js 5.0.0-beta.32).
 
 > **Status: the SQLite → Postgres migration in section 3 has been applied and
-> verified**, along with auth rate limiting and password reset (§10.3). Verified
-> locally against Postgres 17.10: migrations apply, the seed runs,
-> `npm run build` succeeds, 61 unit tests pass, and all 6 Playwright end-to-end
-> tests pass (login, card create + persist, keyboard-drag reorder + persist,
-> login throttling, full password recovery, and account-enumeration resistance).
+> verified**, along with auth rate limiting, password reset (§10.3), and
+> multi-board support. Verified locally against Postgres 17.10: migrations apply,
+> the seed runs, `npm run build` succeeds, 68 unit tests pass, and all 9
+> Playwright end-to-end tests pass — board create/rename/delete, the
+> cross-account 404, card create and keyboard-drag reorder with persistence,
+> login throttling, full password recovery, and account-enumeration resistance.
 >
 > What remains before going live is infrastructure, not code: create the Supabase
 > project (§4), set the environment variables (§5), and clear the deployment
@@ -44,12 +45,16 @@ the auto-generated REST API is not exposing your tables; see section 10.2.
 
 ### Honest scope note
 
-The app is a **multi-account Kanban board**, not yet a multi-tenant SaaS. There
-are no organizations, teams, member roles, sharing, billing, email verification,
-or password reset. `getCurrentUserBoard()` returns the user's *first* board only,
-so each account effectively has one board. None of this blocks deployment — it
-just means what goes live is a working task board with real logins. Section 10.3
-lists what to add before charging anyone for it.
+Project/IO is a **multi-account, multi-board Kanban tool**. Each account signs
+up, owns as many boards as it likes, and can create, rename and delete them;
+boards are private to their owner, enforced in the query rather than by a check
+after loading. That is a real product surface, and it deploys as-is.
+
+It is not yet multi-*tenant*. There are still no organizations, teams, member
+roles, sharing or invitations, and no billing — so it serves individuals, not
+companies. Adding those means a membership model between `User` and `Board`
+(today `Board.ownerId` is a single owner), which is a schema change rather than a
+UI one. Email verification is also still missing; §10.3 has the current list.
 
 ---
 
@@ -549,22 +554,26 @@ On the live URL:
 1. `GET /login` renders over HTTPS with a valid certificate.
 2. `GET /` while signed out redirects to `/login` — the middleware guard is live.
 3. Sign up a real account at `/signup`; you land on `/` with the empty state.
-4. Create a board, a column, and a card. Reload — everything persists.
+4. Create a board — you should be taken straight into it — then add a column and
+   a card. Reload; everything persists. Go back to `/` and confirm the tile shows
+   the right column/card counts.
 5. Drag a card to another column, reload, confirm the new position held. This
    exercises the server action → adapter → Postgres write path end to end.
-6. Sign out, sign back in, confirm the data is still there.
-7. **Redeploy or restart**, then reload. Data must survive — with an external
+6. Sign up a *second* account and paste the first account's `/board/[id]` URL
+   into it. It must 404 — not redirect, and not render the board.
+7. Sign out, sign back in, confirm the data is still there.
+8. **Redeploy or restart**, then reload. Data must survive — with an external
    database it will, which is precisely the improvement over SQLite.
-8. Confirm `demo@example.com` / `password123` does **not** log in.
-9. Enter a wrong password six times for one account. The sixth attempt must
+9. Confirm `demo@example.com` / `password123` does **not** log in.
+10. Enter a wrong password six times for one account. The sixth attempt must
    return "Too many attempts" rather than "Invalid email or password" — this
    confirms the limiter sees a real client IP through your host's proxy, which is
    the part that cannot be verified locally.
-10. Request a password reset. Until you wire up an email provider (§10.3) the
+11. Request a password reset. Until you wire up an email provider (§10.3) the
     link appears in your host's **server logs**, not an inbox — check there, open
     it, and confirm the new password works and the link is refused on reuse. The
     link's host must be your real domain; if it is not, set `APP_URL`.
-11. In the Supabase dashboard, check **Database → Roles/Connections** for
+12. In the Supabase dashboard, check **Database → Roles/Connections** for
     connection count under normal use. If it is near the ceiling at low traffic,
     lower `DB_POOL_MAX`.
 

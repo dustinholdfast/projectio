@@ -11,7 +11,7 @@ import {
 } from "@/components/ui";
 import { ThemeToggle } from "@/components/theme-toggle";
 
-export const metadata = { title: "Design System — TestProject" };
+export const metadata = { title: "Design System — Project/IO" };
 
 const swatches: { name: string; className: string }[] = [
   { name: "background", className: "bg-background" },

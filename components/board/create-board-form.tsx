@@ -16,9 +16,9 @@ function SubmitButton() {
 }
 
 /**
- * Empty-state form shown when the signed-in user has no board yet (e.g. a fresh
- * signup). Creating one reloads the view into the full board. Structure/behavior
- * only — the restyle card owns final presentation.
+ * Create a board. Used both in the empty state (a fresh signup with no boards)
+ * and alongside the list once boards exist. The action redirects into the new
+ * board on success, so there is no local success state to handle here.
  */
 export function CreateBoardForm() {
   const [state, formAction] = useActionState<BoardActionState, FormData>(

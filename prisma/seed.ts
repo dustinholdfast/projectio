@@ -50,12 +50,16 @@ async function main() {
   // The cascade (board → columns → cards) removes all dependent rows.
   await prisma.board.deleteMany({ where: { ownerId: user.id } });
 
-  // Board with its columns and cards defined declaratively, then created with
-  // nested writes so positions stay in sync with declaration order.
-  const columns: {
+  // Boards with their columns and cards defined declaratively, then created with
+  // nested writes so positions stay in sync with declaration order. Two boards,
+  // so the board list has something to list.
+  type SeedColumn = {
     name: string;
     cards: { title: string; description?: string }[];
-  }[] = [
+  };
+  type SeedBoard = { name: string; columns: SeedColumn[] };
+
+  const productRoadmap: SeedColumn[] = [
     {
       name: "To Do",
       cards: [
@@ -101,31 +105,57 @@ async function main() {
     },
   ];
 
-  const board = await prisma.board.create({
-    data: {
-      name: "Product Roadmap",
-      ownerId: user.id,
-      columns: {
-        create: columns.map((column, columnIndex) => ({
-          name: column.name,
-          position: (columnIndex + 1) * POSITION_STEP,
-          cards: {
-            create: column.cards.map((card, cardIndex) => ({
-              title: card.title,
-              description: card.description,
-              position: (cardIndex + 1) * POSITION_STEP,
-            })),
-          },
-        })),
-      },
+  const websiteRefresh: SeedColumn[] = [
+    {
+      name: "Backlog",
+      cards: [
+        { title: "Audit current pages", description: "Inventory what exists." },
+        { title: "Collect brand assets" },
+      ],
     },
-  });
+    {
+      name: "In Progress",
+      cards: [{ title: "Rewrite the landing copy" }],
+    },
+    { name: "Shipped", cards: [] },
+  ];
 
-  const cardCount = columns.reduce((sum, c) => sum + c.cards.length, 0);
-  console.log(
-    `Seeded user ${user.email} with board "${board.name}" ` +
-      `(${columns.length} columns, ${cardCount} cards).`,
-  );
+  const boards: SeedBoard[] = [
+    { name: "Product Roadmap", columns: productRoadmap },
+    { name: "Website Refresh", columns: websiteRefresh },
+  ];
+
+  // Created in order so the list (sorted by updatedAt desc) shows the most
+  // recently seeded board first.
+  for (const board of boards) {
+    await prisma.board.create({
+      data: {
+        name: board.name,
+        ownerId: user.id,
+        columns: {
+          create: board.columns.map((column, columnIndex) => ({
+            name: column.name,
+            position: (columnIndex + 1) * POSITION_STEP,
+            cards: {
+              create: column.cards.map((card, cardIndex) => ({
+                title: card.title,
+                description: card.description,
+                position: (cardIndex + 1) * POSITION_STEP,
+              })),
+            },
+          })),
+        },
+      },
+    });
+  }
+
+  const summary = boards
+    .map((b) => {
+      const cards = b.columns.reduce((sum, c) => sum + c.cards.length, 0);
+      return `"${b.name}" (${b.columns.length} columns, ${cards} cards)`;
+    })
+    .join(", ");
+  console.log(`Seeded user ${user.email} with ${summary}.`);
   console.log(`Demo login: ${DEMO_EMAIL} / ${DEMO_PASSWORD}`);
 }
 
