@@ -1,0 +1,26 @@
+# Line endings.
+#
+# Store LF in the repository and check out LF everywhere, overriding whatever
+# core.autocrlf a given machine has set. Without this, a Windows clone commits
+# CRLF while CI and Linux contributors commit LF, and the two take turns
+# rewriting whole files — diffs that show every line changed and hide the one
+# that actually did.
+* text=auto eol=lf
+
+# Generated: keep it out of diffs and language stats on GitHub. Still tracked
+# and still reviewed when it matters — this only changes how it is displayed.
+package-lock.json linguist-generated=true
+
+# Assets. None are tracked yet, but a favicon or screenshot will arrive
+# eventually, and end-of-line conversion corrupts binary files.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.pdf  binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
