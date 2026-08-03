@@ -449,10 +449,20 @@ is gone.
    - `AUTH_SECRET` → generated value
    - `DB_POOL_MAX` → `2`
    - `AUTH_TRUST_HOST` is **not** needed on Vercel.
-3. **Run the first migration** from your machine against production:
+3. **Run the first migration** from your machine against production. Note the
+   shell: the inline `VAR=value cmd` form is POSIX-only and fails on Windows
+   with *"'DIRECT_URL' is not recognized as an internal or external command"*.
    ```bash
-   DIRECT_URL="<direct-or-session-pooler-string>" npx prisma migrate deploy
+   # bash / zsh
+   DIRECT_URL="<direct-or-session-pooler-string>" npm run db:deploy
    ```
+   ```powershell
+   # PowerShell — single quotes stop $ and & in the password being interpreted
+   $env:DIRECT_URL = '<direct-or-session-pooler-string>'; npm run db:deploy
+   ```
+   The variable persists for that shell session, so a later `db:migrate` there
+   would target production. Close the window, or clear it
+   (`Remove-Item Env:DIRECT_URL`).
 4. **Deploy.** There will be no accounts until someone signs up at `/signup`.
 
 ### Migrations on subsequent deploys
@@ -693,11 +703,21 @@ the flows in section 9 steps 3–5, plus the login throttle.
 ## 11. Quick reference
 
 ```bash
-# Local production rehearsal against a dev Supabase project
+# Local production rehearsal against a dev Supabase project (bash / zsh)
 npm ci
-DIRECT_URL="<direct-string>" npx prisma migrate deploy
+DIRECT_URL="<direct-string>" npm run db:deploy
 npm run build
 DATABASE_URL="<pooler-string>" AUTH_SECRET="$(openssl rand -base64 32)" npm run start
+```
+
+```powershell
+# Same, in PowerShell
+npm ci
+$env:DIRECT_URL = '<direct-string>'; npm run db:deploy
+npm run build
+$env:DATABASE_URL = '<pooler-string>'
+$env:AUTH_SECRET  = [Convert]::ToBase64String((1..32 | % { Get-Random -Max 256 }))
+npm run start
 ```
 
 | Host | Runtime | `DATABASE_URL` | `AUTH_TRUST_HOST` |
