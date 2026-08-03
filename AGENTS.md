@@ -81,6 +81,13 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
   (see `e2e/global-setup.ts`). `migrate reset` also has no `--skip-generate` flag
   in Prisma 7. The seed is idempotent and creates a demo user + populated board —
   login `demo@example.com` / `password123` (bcrypt hash).
+- **Every table needs row-level security.** Supabase publishes the `public`
+  schema through PostgREST, so a table without RLS is one stray `GRANT` from
+  being world-readable. Any migration that adds a table must also
+  `ALTER TABLE "<name>" ENABLE ROW LEVEL SECURITY;` — this was missed once
+  already, when ChecklistItem and CardBlock were added after the lockdown
+  migration. `npm run db:check-rls` fails on any unprotected table; run it after
+  a schema change, and against production, not just locally.
 - **The seed is development/test only.** It creates a well-known account with a
   published password and deletes that user's boards on every run. Never point it,
   `db:reset`, or `migrate reset` at a hosted database. See `DEPLOYMENT.md` §6.2.
