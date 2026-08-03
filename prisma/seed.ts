@@ -61,6 +61,10 @@ async function main() {
       /** Days from today; negative = overdue, 0 = due now, omitted = unscheduled. */
       dueInDays?: number;
       paused?: boolean;
+      owner?: string;
+      category?: string;
+      priority?: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
+      completedDaysAgo?: number;
     }[];
   };
   type SeedBoard = { name: string; columns: SeedColumn[] };
@@ -84,16 +88,24 @@ async function main() {
           title: "Set up project repository",
           description: "Initialize the repo and push the scaffold.",
           dueInDays: -3,
+          owner: "Dustin",
+          category: "Infrastructure",
+          priority: "URGENT",
         },
         {
           title: "Draft product requirements",
           description: "Capture the MVP scope and acceptance criteria.",
           dueInDays: 0,
+          owner: "Dustin",
+          category: "Product",
+          priority: "HIGH",
         },
         {
           title: "Design database schema",
           description: "Model users, boards, columns, and cards.",
           dueInDays: 7,
+          category: "Backend",
+          priority: "MEDIUM",
         },
       ],
     },
@@ -119,10 +131,15 @@ async function main() {
         {
           title: "Scaffold Next.js app",
           description: "App Router + TypeScript + Tailwind.",
+          category: "Infrastructure",
+          priority: "LOW",
+          completedDaysAgo: 9,
         },
         {
           title: "Configure Prisma + Postgres",
           description: "Driver adapter and shared client singleton.",
+          category: "Backend",
+          completedDaysAgo: 4,
         },
       ],
     },
@@ -167,6 +184,13 @@ async function main() {
                 dueDate:
                   card.dueInDays === undefined ? null : dueDateIn(card.dueInDays),
                 pausedAt: card.paused ? today : null,
+                owner: card.owner ?? null,
+                category: card.category ?? null,
+                priority: card.priority ?? null,
+                completedAt:
+                  card.completedDaysAgo === undefined
+                    ? null
+                    : dueDateIn(-card.completedDaysAgo),
               })),
             },
           })),

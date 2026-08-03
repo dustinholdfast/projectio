@@ -5,14 +5,24 @@
 // board grouping, the card badge, and the drag-to-lane action all read from
 // here rather than re-deriving the comparison.
 
-export type DueStatus = "overdue" | "dueNow" | "later" | "paused";
+export type DueStatus =
+  | "overdue"
+  | "dueNow"
+  | "later"
+  | "paused"
+  | "completed";
 
-/** Left-to-right lane order: most urgent first, parked work last. */
+/**
+ * Left-to-right lane order: most urgent first, then parked work, then finished
+ * work. Completed sits last because it is the only lane you are not being asked
+ * to do anything about.
+ */
 export const DUE_STATUS_ORDER: readonly DueStatus[] = [
   "overdue",
   "dueNow",
   "later",
   "paused",
+  "completed",
 ] as const;
 
 export const DUE_STATUS_LABEL: Record<DueStatus, string> = {
@@ -20,6 +30,7 @@ export const DUE_STATUS_LABEL: Record<DueStatus, string> = {
   dueNow: "Due Now",
   later: "Later",
   paused: "Paused",
+  completed: "Completed",
 };
 
 /**
@@ -32,12 +43,14 @@ export const DUE_STATUS_DROPPABLE: Record<DueStatus, boolean> = {
   dueNow: true,
   later: true,
   paused: true,
+  completed: true,
 };
 
 /** The fields the derivation needs — kept structural so tests need no Prisma. */
 export type SchedulableCard = {
   dueDate: Date | null;
   pausedAt: Date | null;
+  completedAt: Date | null;
 };
 
 /**
@@ -69,11 +82,17 @@ export function dayKeyOfInstant(instant: Date): string {
 /**
  * Which lane a card belongs in.
  *
- * Paused takes precedence over everything: a parked card is not "overdue", it is
- * deliberately not being worked on. An unscheduled card (no due date) is Later —
- * it is not late, and it is not due today.
+ * Precedence, highest first:
+ *   • Completed — done is done. A finished card must never report as overdue,
+ *     however long ago its deadline was.
+ *   • Paused — a parked card is not late, it is deliberately not being worked on.
+ *   • Then the date: before today is Overdue, today is Due Now, otherwise Later.
+ *
+ * An unscheduled card (no due date) is Later: it is not late, and it is not due
+ * today.
  */
 export function dueStatusOf(card: SchedulableCard, now: Date): DueStatus {
+  if (card.completedAt) return "completed";
   if (card.pausedAt) return "paused";
   if (!card.dueDate) return "later";
 
@@ -103,14 +122,33 @@ export function scheduleForStatus(
   status: DueStatus,
   today: Date,
   current: SchedulableCard,
-): { dueDate: Date | null; pausedAt: Date | null } | null {
+): {
+  dueDate: Date | null;
+  pausedAt: Date | null;
+  completedAt: Date | null;
+} | null {
   switch (status) {
+    case "completed":
+      // Keep the due date: "finished, and it was due Tuesday" is worth knowing.
+      return {
+        dueDate: current.dueDate,
+        pausedAt: null,
+        completedAt: current.completedAt ?? startOfUtcDay(today),
+      };
     case "paused":
-      return { dueDate: current.dueDate, pausedAt: current.pausedAt ?? today };
+      return {
+        dueDate: current.dueDate,
+        pausedAt: current.pausedAt ?? today,
+        completedAt: null,
+      };
     case "dueNow":
-      return { dueDate: startOfUtcDay(today), pausedAt: null };
+      return {
+        dueDate: startOfUtcDay(today),
+        pausedAt: null,
+        completedAt: null,
+      };
     case "later":
-      return { dueDate: null, pausedAt: null };
+      return { dueDate: null, pausedAt: null, completedAt: null };
     case "overdue":
       return null;
   }
@@ -141,6 +179,7 @@ export function groupByDueStatus<T extends SchedulableCard>(
     dueNow: [],
     later: [],
     paused: [],
+    completed: [],
   };
   for (const card of cards) groups[dueStatusOf(card, now)].push(card);
   return groups;

@@ -102,12 +102,42 @@ model Column {
 
 /// A task card within a column. `position` orders cards top-to-bottom within
 /// their column; a move to another column updates `columnId` and `position`.
+/// Triage weight. Deliberately nullable rather than defaulting to MEDIUM: "nobody
+/// has decided yet" is real information, and a default would erase it by making
+/// every new card look triaged.
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
 model Card {
   id          String   @id @default(cuid())
   title       String
+  /// Short summary, shown on the card face. Long-form detail belongs in `notes`.
   description String?
   position    Float
   columnId    String
+
+  // ── Detail fields (edited in the card dialog) ─────────────────────────────
+  /// Free text, not a User relation. Boards are single-owner with no sharing, so
+  /// a relation would point every card at the same account. Becomes a relation
+  /// when teams exist.
+  owner       String?
+  /// Long-form detail. Unlike `description` this never renders on the card face,
+  /// so it can run to any length without making the board unscannable.
+  notes       String?
+  /// Free text rather than a lookup table: categories differ per board and per
+  /// person, and a fixed list would be wrong for everyone. The dialog offers
+  /// existing values on the board as suggestions.
+  category    String?
+  priority    Priority?
+  /// Date-only, for the same reason as dueDate: these are days, not instants.
+  startedAt   DateTime? @db.Date
+  /// Set = the card is done. Takes precedence over every other schedule state
+  /// (see lib/due-status.ts) — finished work must not keep reporting as overdue.
+  completedAt DateTime? @db.Date
   /// Calendar day the card is due, stored date-only (`@db.Date`) because a due
   /// date is a day, not an instant — storing a timestamp would make the same
   /// card read as due on different days in different timezones. Null = unscheduled.
@@ -121,6 +151,51 @@ model Card {
 
   column Column @relation(fields: [columnId], references: [id], onDelete: Cascade)
 
+  checklist ChecklistItem[]
+  /// Cards this one waits on.
+  blockedBy CardBlock[] @relation("BlockedCard")
+  /// Cards waiting on this one.
+  blocking  CardBlock[] @relation("BlockerCard")
+
   // Ordered lookups of a column's cards hit (columnId, position) together.
   @@index([columnId, position])
+}
+
+/// A tick-box sub-item on a card. Ordered with the same `position` Float scheme
+/// as columns and cards, so the midpoint insert logic in lib/reorder.ts applies
+/// unchanged.
+model ChecklistItem {
+  id        String   @id @default(cuid())
+  cardId    String
+  text      String
+  done      Boolean  @default(false)
+  position  Float
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([cardId, position])
+}
+
+/// "`blocked` cannot proceed until `blocker` is done."
+///
+/// An explicit join table rather than an implicit many-to-many, because the two
+/// sides mean different things and the naming has to say which is which — an
+/// implicit relation would give an opaque `_CardToCard` table.
+///
+/// Both sides cascade: deleting either card removes the link rather than leaving
+/// a dangling dependency. Cycles and cross-board links are rejected in the
+/// action layer (see lib/actions/card-details.ts), not here — Postgres has no
+/// native way to express "no cycles in this graph".
+model CardBlock {
+  blockedId String
+  blockerId String
+  createdAt DateTime @default(now())
+
+  blocked Card @relation("BlockedCard", fields: [blockedId], references: [id], onDelete: Cascade)
+  blocker Card @relation("BlockerCard", fields: [blockerId], references: [id], onDelete: Cascade)
+
+  @@id([blockedId, blockerId])
+  @@index([blockerId])
 }

@@ -3,7 +3,8 @@ import { gotoReady, waitForLanding } from "./helpers";
 
 // Coverage of the schedule view: the grouping toggle, that seeded cards land in
 // the lane their due date implies, and that pausing/scheduling moves them between
-// lanes and survives a reload.
+// lanes and survives a reload. Five lanes since completion was added — Overdue,
+// Due Now, Later, Paused, Completed.
 //
 // Seeded due dates are relative to the seed run (see prisma/seed.ts), so these
 // assertions hold whenever the suite runs.
@@ -23,7 +24,7 @@ async function openScheduleView(page: Page) {
 
   await page.getByTestId("group-due").click();
   await expect(page).toHaveURL(/\?group=due$/);
-  await expect(page.getByTestId("due-lane")).toHaveCount(4);
+  await expect(page.getByTestId("due-lane")).toHaveCount(5);
 }
 
 function lane(page: Page, status: string): Locator {
@@ -55,10 +56,15 @@ test("groups seeded cards into the lane their due date implies", async ({ page }
   await expect(cardTitles(lane(page, "paused"))).resolves.toContain(
     "Wire up credential auth",
   );
-  // Seeded +7 days, plus the two undated "Done" cards.
+  // Seeded +7 days.
   const later = await cardTitles(lane(page, "later"));
   expect(later).toContain("Design database schema");
-  expect(later).toContain("Scaffold Next.js app");
+
+  // The "Done" column's cards carry completion dates, so they land in Completed
+  // rather than Later — completion outranks every other schedule state.
+  await expect(cardTitles(lane(page, "completed"))).resolves.toEqual(
+    expect.arrayContaining(["Scaffold Next.js app", "Configure Prisma + Postgres"]),
+  );
 });
 
 test("Overdue refuses drops — a card gets there by time passing, not by choice", async ({
@@ -102,5 +108,5 @@ test("the toggle returns to the column view and the URL carries the choice", asy
 
   // The schedule view is linkable, not just reachable by clicking.
   await gotoReady(page, `${page.url()}?group=due`);
-  await expect(page.getByTestId("due-lane")).toHaveCount(4);
+  await expect(page.getByTestId("due-lane")).toHaveCount(5);
 });

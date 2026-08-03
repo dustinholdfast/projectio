@@ -355,7 +355,7 @@ export async function setCardDueStatus(input: {
 
   const current = await prisma.card.findUnique({
     where: { id: input.cardId },
-    select: { dueDate: true, pausedAt: true },
+    select: { dueDate: true, pausedAt: true, completedAt: true },
   });
   if (!current) return { error: "Card not found." };
 

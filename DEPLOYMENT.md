@@ -8,12 +8,14 @@ Written against the code as it stands on 2026-08-03 (Next.js 15.5.22, Prisma
 
 > **Status: the SQLite → Postgres migration in section 3 has been applied and
 > verified**, along with auth rate limiting, password reset (§10.3), and
-> multi-board support and card scheduling. Verified locally against Postgres
-> 17.10: migrations apply, the seed runs, `npm run build` succeeds, 92 unit tests
-> pass, and all 13 Playwright end-to-end tests pass — board create/rename/delete,
-> the cross-account 404, card create and keyboard-drag reorder with persistence,
-> the Overdue / Due Now / Later / Paused schedule view, login throttling, full
-> password recovery, and account-enumeration resistance.
+> multi-board support, card scheduling, and the card detail dialog. Verified
+> locally against Postgres 17.10: migrations apply, the seed runs,
+> `npm run build` succeeds, 117 unit tests pass, and all 18 Playwright end-to-end
+> tests pass — board create/rename/delete, the cross-account 404, card create and
+> keyboard-drag reorder with persistence, the Overdue / Due Now / Later / Paused /
+> Completed schedule view, card details with checklists and dependency-cycle
+> refusal, login throttling, full password recovery, and account-enumeration
+> resistance.
 >
 > What remains before going live is infrastructure, not code: create the Supabase
 > project (§4), set the environment variables (§5), and clear the deployment
@@ -34,9 +36,10 @@ Written against the code as it stands on 2026-08-03 (Next.js 15.5.22, Prisma
 | Styling | Tailwind CSS v4 | Build-time only |
 
 Data model: `User → Board → Column → Card`, ordered by a `Float position` with
-midpoint inserts. Cascading deletes throughout. Cards carry a date-only `dueDate`
-and a `pausedAt`, from which the Overdue / Due Now / Later / Paused lanes are
-derived rather than stored.
+midpoint inserts, plus `ChecklistItem` and a `CardBlock` join table for
+dependencies. Cascading deletes throughout. Cards carry date-only `dueDate`,
+`startedAt` and `completedAt` plus `pausedAt`, from which the Overdue / Due Now /
+Later / Paused / Completed lanes are derived rather than stored.
 
 ### What Supabase is doing here
 

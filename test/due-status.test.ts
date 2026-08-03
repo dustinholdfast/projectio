@@ -25,31 +25,31 @@ const NOW = middayLocal(2026, 8, 3);
 
 describe("dueStatusOf", () => {
   it("is Overdue when the due day is before today", () => {
-    expect(dueStatusOf({ dueDate: dueOn("2026-08-02"), pausedAt: null }, NOW)).toBe(
+    expect(dueStatusOf({ dueDate: dueOn("2026-08-02"), pausedAt: null, completedAt: null }, NOW)).toBe(
       "overdue",
     );
   });
 
   it("is Due Now on the due day itself", () => {
-    expect(dueStatusOf({ dueDate: dueOn("2026-08-03"), pausedAt: null }, NOW)).toBe(
+    expect(dueStatusOf({ dueDate: dueOn("2026-08-03"), pausedAt: null, completedAt: null }, NOW)).toBe(
       "dueNow",
     );
   });
 
   it("is Later when the due day is still ahead", () => {
-    expect(dueStatusOf({ dueDate: dueOn("2026-08-04"), pausedAt: null }, NOW)).toBe(
+    expect(dueStatusOf({ dueDate: dueOn("2026-08-04"), pausedAt: null, completedAt: null }, NOW)).toBe(
       "later",
     );
   });
 
   it("is Later when there is no due date — unscheduled is not late", () => {
-    expect(dueStatusOf({ dueDate: null, pausedAt: null }, NOW)).toBe("later");
+    expect(dueStatusOf({ dueDate: null, pausedAt: null, completedAt: null }, NOW)).toBe("later");
   });
 
   it("is Paused regardless of the date, even a past one", () => {
     // The point of pausing: parked work should stop nagging.
     expect(
-      dueStatusOf({ dueDate: dueOn("2020-01-01"), pausedAt: NOW }, NOW),
+      dueStatusOf({ dueDate: dueOn("2020-01-01"), pausedAt: NOW, completedAt: null }, NOW),
     ).toBe("paused");
   });
 
@@ -57,23 +57,23 @@ describe("dueStatusOf", () => {
     const lateOnTheDueDay = middayLocal(2026, 8, 3);
     lateOnTheDueDay.setHours(23, 59, 59);
     expect(
-      dueStatusOf({ dueDate: dueOn("2026-08-03"), pausedAt: null }, lateOnTheDueDay),
+      dueStatusOf({ dueDate: dueOn("2026-08-03"), pausedAt: null, completedAt: null }, lateOnTheDueDay),
     ).toBe("dueNow");
 
     const justAfterMidnight = middayLocal(2026, 8, 4);
     justAfterMidnight.setHours(0, 0, 1);
     expect(
-      dueStatusOf({ dueDate: dueOn("2026-08-03"), pausedAt: null }, justAfterMidnight),
+      dueStatusOf({ dueDate: dueOn("2026-08-03"), pausedAt: null, completedAt: null }, justAfterMidnight),
     ).toBe("overdue");
   });
 
   it("compares across month and year ends", () => {
     const newYearsDay = middayLocal(2027, 1, 1);
     expect(
-      dueStatusOf({ dueDate: dueOn("2026-12-31"), pausedAt: null }, newYearsDay),
+      dueStatusOf({ dueDate: dueOn("2026-12-31"), pausedAt: null, completedAt: null }, newYearsDay),
     ).toBe("overdue");
     expect(
-      dueStatusOf({ dueDate: dueOn("2027-01-01"), pausedAt: null }, newYearsDay),
+      dueStatusOf({ dueDate: dueOn("2027-01-01"), pausedAt: null, completedAt: null }, newYearsDay),
     ).toBe("dueNow");
   });
 });
@@ -95,14 +95,14 @@ describe("day keys", () => {
 });
 
 describe("scheduleForStatus", () => {
-  const card = { dueDate: dueOn("2026-08-01"), pausedAt: null };
+  const card = { dueDate: dueOn("2026-08-01"), pausedAt: null, completedAt: null };
 
   it("refuses Overdue — it is not a state anyone can choose", () => {
     expect(scheduleForStatus("overdue", NOW, card)).toBeNull();
   });
 
   it("sets Due Now to today and unpauses", () => {
-    const result = scheduleForStatus("dueNow", NOW, { ...card, pausedAt: NOW });
+    const result = scheduleForStatus("dueNow", NOW, { ...card, pausedAt: NOW, completedAt: null });
     expect(dayKeyOfDueDate(result!.dueDate!)).toBe("2026-08-03");
     expect(result!.pausedAt).toBeNull();
   });
@@ -111,6 +111,7 @@ describe("scheduleForStatus", () => {
     expect(scheduleForStatus("later", NOW, card)).toEqual({
       dueDate: null,
       pausedAt: null,
+      completedAt: null,
     });
   });
 
@@ -125,12 +126,13 @@ describe("scheduleForStatus", () => {
     const result = scheduleForStatus("paused", NOW, {
       dueDate: null,
       pausedAt: pausedEarlier,
+      completedAt: null,
     });
     expect(result!.pausedAt).toEqual(pausedEarlier);
   });
 
   it("round-trips: applying a status puts the card in that status", () => {
-    for (const status of ["dueNow", "later", "paused"] as const) {
+    for (const status of ["dueNow", "later", "paused", "completed"] as const) {
       const applied = scheduleForStatus(status, NOW, card)!;
       expect(dueStatusOf(applied, NOW)).toBe(status);
     }
@@ -162,11 +164,11 @@ describe("startOfUtcDay", () => {
 describe("groupByDueStatus", () => {
   it("puts every card in exactly one lane", () => {
     const cards = [
-      { id: "a", dueDate: dueOn("2026-08-01"), pausedAt: null },
-      { id: "b", dueDate: dueOn("2026-08-03"), pausedAt: null },
-      { id: "c", dueDate: dueOn("2026-09-01"), pausedAt: null },
-      { id: "d", dueDate: null, pausedAt: null },
-      { id: "e", dueDate: dueOn("2026-08-01"), pausedAt: NOW },
+      { id: "a", dueDate: dueOn("2026-08-01"), pausedAt: null, completedAt: null },
+      { id: "b", dueDate: dueOn("2026-08-03"), pausedAt: null, completedAt: null },
+      { id: "c", dueDate: dueOn("2026-09-01"), pausedAt: null, completedAt: null },
+      { id: "d", dueDate: null, pausedAt: null, completedAt: null },
+      { id: "e", dueDate: dueOn("2026-08-01"), pausedAt: NOW, completedAt: null },
     ];
 
     const groups = groupByDueStatus(cards, NOW);
@@ -182,8 +184,8 @@ describe("groupByDueStatus", () => {
 
   it("preserves the order cards arrive in", () => {
     const cards = [
-      { id: "second", dueDate: dueOn("2026-09-02"), pausedAt: null },
-      { id: "first", dueDate: dueOn("2026-09-01"), pausedAt: null },
+      { id: "second", dueDate: dueOn("2026-09-02"), pausedAt: null, completedAt: null },
+      { id: "first", dueDate: dueOn("2026-09-01"), pausedAt: null, completedAt: null },
     ];
     expect(groupByDueStatus(cards, NOW).later.map((c) => c.id)).toEqual([
       "second",
@@ -199,7 +201,13 @@ describe("groupByDueStatus", () => {
 
 describe("lane rules", () => {
   it("orders lanes most-urgent first", () => {
-    expect(DUE_STATUS_ORDER).toEqual(["overdue", "dueNow", "later", "paused"]);
+    expect(DUE_STATUS_ORDER).toEqual([
+      "overdue",
+      "dueNow",
+      "later",
+      "paused",
+      "completed",
+    ]);
   });
 
   it("makes Overdue the only lane you cannot drop into", () => {
@@ -207,5 +215,94 @@ describe("lane rules", () => {
     expect(DUE_STATUS_DROPPABLE.dueNow).toBe(true);
     expect(DUE_STATUS_DROPPABLE.later).toBe(true);
     expect(DUE_STATUS_DROPPABLE.paused).toBe(true);
+    expect(DUE_STATUS_DROPPABLE.completed).toBe(true);
+  });
+});
+
+describe("completion", () => {
+  const doneOn = dueOn("2026-07-20");
+
+  it("beats an overdue date — finished work must never report as late", () => {
+    expect(
+      dueStatusOf(
+        { dueDate: dueOn("2020-01-01"), pausedAt: null, completedAt: doneOn },
+        NOW,
+      ),
+    ).toBe("completed");
+  });
+
+  it("beats paused, so a completed card is not also parked", () => {
+    expect(
+      dueStatusOf({ dueDate: null, pausedAt: NOW, completedAt: doneOn }, NOW),
+    ).toBe("completed");
+  });
+
+  it("beats a due-today date", () => {
+    expect(
+      dueStatusOf(
+        { dueDate: dueOn("2026-08-03"), pausedAt: null, completedAt: doneOn },
+        NOW,
+      ),
+    ).toBe("completed");
+  });
+
+  it("stamps today when a card is dragged into Completed", () => {
+    const result = scheduleForStatus("completed", NOW, {
+      dueDate: dueOn("2026-08-01"),
+      pausedAt: null,
+      completedAt: null,
+    });
+    expect(dayKeyOfDueDate(result!.completedAt!)).toBe("2026-08-03");
+  });
+
+  it("keeps the due date, so 'finished, and it was due Tuesday' survives", () => {
+    const due = dueOn("2026-08-01");
+    const result = scheduleForStatus("completed", NOW, {
+      dueDate: due,
+      pausedAt: null,
+      completedAt: null,
+    });
+    expect(result!.dueDate).toEqual(due);
+  });
+
+  it("does not re-stamp an already-completed card", () => {
+    const result = scheduleForStatus("completed", NOW, {
+      dueDate: null,
+      pausedAt: null,
+      completedAt: doneOn,
+    });
+    expect(result!.completedAt).toEqual(doneOn);
+  });
+
+  it("un-pauses on completion — parked and finished cannot both be current", () => {
+    const result = scheduleForStatus("completed", NOW, {
+      dueDate: null,
+      pausedAt: NOW,
+      completedAt: null,
+    });
+    expect(result!.pausedAt).toBeNull();
+  });
+
+  it("clears completion when dragged back out to another lane", () => {
+    for (const status of ["dueNow", "later", "paused"] as const) {
+      const result = scheduleForStatus(status, NOW, {
+        dueDate: null,
+        pausedAt: null,
+        completedAt: doneOn,
+      });
+      expect(result!.completedAt).toBeNull();
+    }
+  });
+
+  it("groups into the Completed lane", () => {
+    const groups = groupByDueStatus(
+      [
+        { id: "done", dueDate: dueOn("2020-01-01"), pausedAt: null, completedAt: doneOn },
+        { id: "late", dueDate: dueOn("2020-01-01"), pausedAt: null, completedAt: null },
+      ],
+      NOW,
+    );
+    expect(groups.completed.map((c) => c.id)).toEqual(["done"]);
+    expect(groups.overdue.map((c) => c.id)).toEqual(["late"]);
   });
 });

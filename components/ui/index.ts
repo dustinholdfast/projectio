@@ -11,3 +11,6 @@ export {
   CardFooter,
 } from "./card";
 export { Badge, type BadgeColor, type BadgeProps } from "./badge";
+export { Textarea } from "./textarea";
+export { Select } from "./select";
+export { Dialog } from "./dialog";

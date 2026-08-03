@@ -74,7 +74,22 @@ export async function getBoardForUser(boardId: string) {
       columns: {
         orderBy: { position: "asc" },
         include: {
-          cards: { orderBy: { position: "asc" } },
+          cards: {
+            orderBy: { position: "asc" },
+            include: {
+              checklist: { orderBy: { position: "asc" } },
+              // Only the blocker's id and title: the dialog lists what a card is
+              // waiting on, and pulling whole blocker cards here would fan out
+              // into a second copy of most of the board.
+              blockedBy: {
+                orderBy: { createdAt: "asc" },
+                select: {
+                  blockerId: true,
+                  blocker: { select: { id: true, title: true, completedAt: true } },
+                },
+              },
+            },
+          },
         },
       },
     },

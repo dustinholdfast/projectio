@@ -35,6 +35,7 @@ import {
 import { AddCardForm } from "@/components/board/add-card-form";
 import { AddColumnForm } from "@/components/board/add-column-form";
 import { CardSchedule } from "@/components/board/card-schedule";
+import { CardDialog } from "@/components/board/card-dialog";
 import {
   reorderCard,
   reorderColumn,
@@ -71,6 +72,16 @@ type DragKind =
   | { type: "column"; column: ColumnWithCards; hue: BadgeColor }
   | { type: "card"; card: BoardCard; hue: BadgeColor; tag: string };
 
+/**
+ * "Open this card's detail dialog", supplied by BoardView.
+ *
+ * Context rather than a prop: cards render three layers down through two
+ * different paths (sortable in the column view, draggable in the schedule view),
+ * and threading a callback through every shell for one leaf concern makes those
+ * components harder to read than the indirection costs.
+ */
+const OpenCardContext = React.createContext<(cardId: string) => void>(() => {});
+
 export function BoardView({
   board,
   groupBy = "column",
@@ -87,7 +98,19 @@ export function BoardView({
   // "Today" is read once per render pass rather than per card, so every card in
   // one render is bucketed against the same instant — otherwise a render that
   // straddles midnight could place two equally-dated cards in different lanes.
+  // Recomputed when fresh board data arrives, which is also the moment a
+  // long-open tab would want a newer "today". `board` is the signal for that, not
+  // an input to the computation, hence the exhaustive-deps exception.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const now = React.useMemo(() => new Date(), [board]);
+
+  // Which card's detail dialog is open, by id. Held as an id rather than the
+  // card object so the dialog re-reads from `columns` after a save and shows the
+  // updated card instead of the snapshot it was opened with.
+  const [openCardId, setOpenCardId] = React.useState<string | null>(null);
+  const openCard = openCardId
+    ? columns.flatMap((c) => c.cards).find((k) => k.id === openCardId) ?? null
+    : null;
 
   // Re-sync from the server whenever a fresh board arrives (after revalidation).
   // Our optimistic state already matches a successful move, so this is a no-op in
@@ -241,6 +264,7 @@ export function BoardView({
   }
 
   return (
+    <OpenCardContext.Provider value={setOpenCardId}>
     <DndContext
       sensors={sensors}
       collisionDetection={closestCorners}
@@ -277,7 +301,16 @@ export function BoardView({
           <TaskCardShell card={active.card} hue={active.hue} tag={active.tag} dragging />
         ) : null}
       </DragOverlay>
+
+      {openCard ? (
+        <CardDialog
+          card={openCard}
+          columns={columns}
+          onClose={() => setOpenCardId(null)}
+        />
+      ) : null}
     </DndContext>
+    </OpenCardContext.Provider>
   );
 }
 
@@ -420,6 +453,7 @@ function DraggableCard({
   hue: BadgeColor;
   tag: string;
 }) {
+  const openCard = React.useContext(OpenCardContext);
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: card.id,
     data: { type: "card" },
@@ -433,6 +467,7 @@ function DraggableCard({
       data-card-title={card.title}
       {...attributes}
       {...listeners}
+      onClick={() => openCard(card.id)}
     >
       <TaskCardShell card={card} hue={hue} tag={tag} showSchedule />
     </div>
@@ -445,7 +480,23 @@ const DUE_HUE: Record<DueStatus, BadgeColor> = {
   dueNow: "amber",
   later: "blue",
   paused: "slate",
+  completed: "green",
 };
+
+const PRIORITY_LABEL = {
+  LOW: "Low",
+  MEDIUM: "Medium",
+  HIGH: "High",
+  URGENT: "Urgent",
+} as const;
+
+/** Urgent and High share the alarm colours; Low stays quiet on purpose. */
+const PRIORITY_HUE = {
+  LOW: "slate",
+  MEDIUM: "blue",
+  HIGH: "amber",
+  URGENT: "rose",
+} as const satisfies Record<string, BadgeColor>;
 
 // ── Sortable wrappers ────────────────────────────────────────────────────────
 
@@ -506,6 +557,8 @@ function SortableCard({
     opacity: isDragging ? 0.4 : undefined,
   };
 
+  const openCard = React.useContext(OpenCardContext);
+
   return (
     <div
       ref={setNodeRef}
@@ -514,6 +567,10 @@ function SortableCard({
       data-card-title={card.title}
       {...attributes}
       {...listeners}
+      // A click and a drag are distinguishable here: PointerSensor only activates
+      // after 6px of movement, so a click that never moves never becomes a drag
+      // and this fires cleanly.
+      onClick={() => openCard(card.id)}
     >
       <TaskCardShell card={card} hue={hue} tag={tag} />
     </div>
@@ -598,6 +655,10 @@ function TaskCardShell({
   /** Render the date/pause controls. On in the schedule view, off in columns. */
   showSchedule?: boolean;
 }) {
+  const blockedByOpen = card.blockedBy.filter(
+    (block) => !block.blocker.completedAt,
+  ).length;
+
   return (
     <Card
       className={`p-4 transition-shadow hover:shadow-md ${
@@ -616,6 +677,17 @@ function TaskCardShell({
       ) : null}
       <CardContent className="flex flex-wrap items-center gap-2 p-0 pt-3">
         <Badge color={hue}>{tag}</Badge>
+        {/* Priority first: it is what the eye should catch when triaging. */}
+        {card.priority ? (
+          <Badge color={PRIORITY_HUE[card.priority]} data-testid="card-priority">
+            {PRIORITY_LABEL[card.priority]}
+          </Badge>
+        ) : null}
+        {card.category ? (
+          <Badge color="violet" data-testid="card-category">
+            {card.category}
+          </Badge>
+        ) : null}
         {/* A due date is worth seeing in the column view too — it is the reason a
             card will show up in Overdue tomorrow. */}
         {card.dueDate ? (
@@ -626,10 +698,30 @@ function TaskCardShell({
             Due {dayKeyOfDueDate(card.dueDate)}
           </span>
         ) : null}
+        {card.completedAt ? <Badge color="green">Done</Badge> : null}
         {card.pausedAt ? (
           <Badge color="slate">Paused</Badge>
         ) : null}
       </CardContent>
+
+      {(card.owner || card.checklist.length > 0 || blockedByOpen > 0) ? (
+        <CardContent className="flex flex-wrap items-center gap-3 p-0 pt-2 text-xs text-muted-foreground">
+          {card.owner ? <span data-testid="card-owner">{card.owner}</span> : null}
+          {card.checklist.length > 0 ? (
+            <span data-testid="card-checklist">
+              ☑ {card.checklist.filter((i) => i.done).length}/
+              {card.checklist.length}
+            </span>
+          ) : null}
+          {/* Only unfinished blockers are worth flagging — once they are done the
+              card is no longer waiting on anything. */}
+          {blockedByOpen > 0 ? (
+            <span data-testid="card-blocked" className="text-destructive">
+              ⛔ Blocked by {blockedByOpen}
+            </span>
+          ) : null}
+        </CardContent>
+      ) : null}
       {showSchedule && !dragging ? (
         <CardContent className="p-0 pt-3">
           <CardSchedule

@@ -46,6 +46,9 @@ export function CardSchedule({
       className="flex items-center gap-2"
       onPointerDown={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
+      // The card is both a drag handle and a click target that opens the detail
+      // dialog. Without this, using the date picker would also open the dialog.
+      onClick={(event) => event.stopPropagation()}
     >
       <label className="sr-only" htmlFor={`due-${cardId}`}>
         Due date

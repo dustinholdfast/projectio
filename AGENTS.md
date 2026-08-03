@@ -66,9 +66,9 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
   `DB_POOL_MAX` (default 5), and the ceiling that matters is instances × that.
 - Local development runs Postgres in Docker; see `.env.example` for the
   container and connection strings.
-- Domain models: `User` → `Board` → `Column` → `Card` (single-user Kanban), plus
-  `AuthAttempt` (rate-limit ledger) and `PasswordResetToken` — both described
-  under Authentication below.
+- Domain models: `User` → `Board` → `Column` → `Card`, with `ChecklistItem` and
+  the `CardBlock` join table hanging off `Card`, plus `AuthAttempt` (rate-limit
+  ledger) and `PasswordResetToken` — described under Authentication below.
   `User` carries credential-auth fields (`email` unique, `passwordHash`).
   `Column`/`Card` ordering uses a `Float position` per sibling set — a row
   dropped between two neighbors takes the midpoint of their positions, so a
@@ -167,7 +167,37 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
 - **Revalidate through `revalidateBoard(boardId)`**, which refreshes both
   `/board/[id]` and `/` — the list shows per-board counts, so a card write
   changes it too. Do not reintroduce a bare `revalidatePath("/")`.
-### Scheduling (Overdue / Due Now / Later / Paused)
+### Card details
+
+- Clicking a card opens `components/board/card-dialog.tsx`. It holds every field
+  that does not belong on the card face: owner, category, priority, due/started/
+  completed dates, description, notes, a checklist, and a blocked-by list.
+- **Owner is free text, not a `User` relation.** Boards are single-owner with no
+  sharing, so a relation would point every card at the same account. It becomes a
+  relation when teams exist — do not "fix" it before then.
+- **Description and Notes are different things.** Description is the short
+  summary rendered on the card face; Notes is long-form and never leaves the
+  dialog. Keep that split, or the board stops being scannable.
+- The detail fields save as one form; the checklist and blocker lists save on
+  each interaction. That split is deliberate: the former are edited together and
+  a per-field autosave would fire a request per keystroke in Notes, while each of
+  the latter is already a discrete decision with nothing to cancel back to.
+- Checkbox ticks are optimistic (`useOptimistic`). Without it the box stays
+  visually unchanged until the server round-trip lands, which reads as a broken
+  control rather than a slow one.
+- `completedAt` before `startedAt` is rejected rather than stored — the usual
+  cause is a typo, and accepting it would corrupt any future cycle-time figure.
+- **Dependencies: `lib/card-blocks.ts` is pure so cycle detection is testable.**
+  A cycle that reaches the database cannot be undone through the UI — every card
+  in the loop refuses to move and no screen shows the loop. `checkBlockAllowed`
+  rejects self-links, duplicates, cross-board links, and anything closing a
+  cycle; `dependsOn` walks iteratively with a visited set, so a long chain will
+  not overflow the stack and pre-existing bad data terminates instead of hanging.
+- The card face counts only *unfinished* blockers: once a blocker is done the
+  card is no longer waiting on anything. Tests that assert on the blocked badge
+  must not use a blocker another test completes.
+
+### Scheduling (Overdue / Due Now / Later / Paused / Completed)
 
 - `/board/[id]?group=due` swaps the columns for four derived lanes. The choice
   lives in the URL (`components/board/group-toggle.tsx`) so it survives a reload
@@ -177,9 +207,12 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
   and it is pure so the boundaries are testable without a clock or a database.
   Do not add a `status` column: it would let a card claim "Overdue" while holding
   a future date.
-- Rules: Paused wins over any date (parked work should stop nagging); no due date
-  means Later (unscheduled is not late); otherwise Overdue / Due Now / Later by
-  calendar day.
+- Rules, highest precedence first: **Completed** wins over everything (finished
+  work must never report as late), then **Paused** (parked work should stop
+  nagging), then the date. No due date means Later — unscheduled is not late.
+- Completing a card un-pauses it: "parked" and "finished" are different answers
+  to "why is nobody working on this", and only one can be current. Dragging a
+  card out of Completed clears `completedAt`.
 - `Card.dueDate` is `@db.Date` — a due date is a *day*, not an instant. Read it
   with `dayKeyOfDueDate` (UTC components, since `@db.Date` returns midnight UTC);
   read "today" with `dayKeyOfInstant` (local components). Mixing the two shifts
@@ -254,8 +287,16 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
   gets the same confirmation and no mail. Both specs create their own accounts
   rather than touching `demo@example.com`, so they cannot lock out or mutate what
   the board specs rely on; keep it that way.
+- **The e2e database is shared across the whole run and seeded once.** A spec that
+  mutates a seeded card changes what later specs see — completing a card moved it
+  out of the lane `due-status.spec` asserts on, failing a spec that had nothing
+  wrong with it. Create your own card (or account) when a test mutates state that
+  another spec reads.
   `e2e/boards.spec.ts` covers the list, create → rename → delete, and the
   cross-account boundary (another user's board URL must 404).
+  `e2e/card-details.spec.ts` covers the detail dialog: saving fields, the
+  start/complete date validation, completion moving a card to the Completed lane,
+  the checklist, and blocking including the refused cycle.
   `e2e/due-status.spec.ts` covers the schedule view: the toggle, seeded cards
   landing in the lane their date implies, Overdue refusing drops, and pause →
   resume round-tripping through a reload.
