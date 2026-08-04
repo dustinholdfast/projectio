@@ -93,18 +93,31 @@ export async function requestPasswordReset(
     const rawToken = await issueResetToken(user.id);
     const link = `${await appBaseUrl()}/reset-password?token=${encodeURIComponent(rawToken)}`;
 
-    await getMailer().send({
-      to: email,
-      subject: "Reset your password",
-      text: [
-        "Someone asked to reset the password for this account.",
-        "",
-        `Open this link to choose a new password: ${link}`,
-        "",
-        "The link is valid for one hour and can be used once.",
-        "If this wasn't you, no action is needed — the password is unchanged.",
-      ].join("\n"),
-    });
+    try {
+      await getMailer().send({
+        to: email,
+        subject: "Reset your password",
+        text: [
+          "Someone asked to reset the password for this account.",
+          "",
+          `Open this link to choose a new password: ${link}`,
+          "",
+          "The link is valid for one hour and can be used once.",
+          "If this wasn't you, no action is needed — the password is unchanged.",
+        ].join("\n"),
+      });
+    } catch (error) {
+      // A send failure must not change what the caller sees. Only a *real*
+      // account reaches this line, so letting the error propagate would make
+      // "provider is down" answer the question this whole flow refuses to
+      // answer: an unknown address would return the confirmation while a
+      // registered one returned an error page.
+      //
+      // The cost is that a genuine outage looks like success to the user. That
+      // is the right trade — but it means the log line below is the only signal,
+      // so it is worth alerting on.
+      console.error("[password-reset] Failed to send reset email:", error);
+    }
   }
 
   // Identical response either way.

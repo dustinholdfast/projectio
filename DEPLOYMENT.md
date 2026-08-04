@@ -10,7 +10,7 @@ Written against the code as it stands on 2026-08-03 (Next.js 15.5.22, Prisma
 > verified**, along with auth rate limiting, password reset (§10.3), and
 > multi-board support, card scheduling, and the card detail dialog. Verified
 > locally against Postgres 17.10: migrations apply, the seed runs,
-> `npm run build` succeeds, 123 unit tests pass, and all 20 Playwright end-to-end
+> `npm run build` succeeds, 135 unit tests pass, and all 20 Playwright end-to-end
 > tests pass — board create/rename/delete, the cross-account 404, card create and
 > keyboard-drag reorder with persistence, the Overdue / Due Now / Later / Paused /
 > Completed schedule view, card details with checklists and dependency-cycle
@@ -665,14 +665,27 @@ returns one message, and requests for unregistered addresses are rate limited
 too, so the limiter cannot be used as an existence oracle. Verified end to end in
 `e2e/password-reset.spec.ts`.
 
-**The one thing left: wire up an email provider.** `lib/mailer.ts` is a
-one-method interface with only a console transport, so reset links currently go
-to the *server log* rather than a user's inbox. That is fine for staging and
-makes the flow fully testable, but it is not account recovery for real users —
-and anyone with log access can take over an account that requests a reset. The
-file documents exactly what to implement (a Resend example is included); it
-warns once at runtime in production so the state is visible rather than silent.
-Do this before inviting anyone who is not you.
+**Email is wired to Resend**, and needs two variables to become live:
+
+| Variable | Value |
+|---|---|
+| `RESEND_API_KEY` | From resend.com/api-keys |
+| `EMAIL_FROM` | An address on a **domain verified in Resend** |
+
+Both are required. With only one set the app deliberately falls back to the log
+transport and warns, rather than calling Resend with an undefined sender and
+failing every send at request time.
+
+The domain is the part that takes real effort: Resend rejects an unverified
+sender **at send time, not at configuration time**, so a wrong `EMAIL_FROM`
+appears to work until a real user asks for a reset. Verifying a domain means
+adding DNS records; a `.vercel.app` subdomain cannot be verified. Until a domain
+is verified, reset links keep going to the runtime log — usable for you, not
+account recovery for anyone else.
+
+A send failure is caught and logged rather than shown, because varying the
+response by outcome would leak which addresses have accounts (§10.3). That makes
+the log line the *only* signal a real outage gives — worth alerting on.
 
 **Still open:**
 

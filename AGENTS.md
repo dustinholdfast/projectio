@@ -140,10 +140,23 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
     account-existence oracle. Preserve all of this when editing.
   - Resetting does not sign the user in: holding the link does not prove account
     ownership until they can also use the new password.
-- **Email** (`lib/mailer.ts`) is a one-method `Mailer` interface with only a
-  console transport; no provider is wired up, and `lib/mailer.ts` documents how
-  to add one. In production without a provider, reset links land in the server
-  log and `getMailer()` warns once. The console transport also mirrors messages
+- **Email** (`lib/mailer.ts`) is a one-method `Mailer` interface with two
+  transports, chosen by configuration: Resend when both `RESEND_API_KEY` and
+  `EMAIL_FROM` are set, otherwise a console transport that writes to the server
+  log and warns once in production. A *half*-configured provider deliberately
+  falls back rather than calling Resend with an undefined sender and failing
+  every send at request time.
+  - `send` throws on failure by design — a transport that swallowed errors would
+    make "delivered" and "vanished" indistinguishable. Callers decide what that
+    means.
+  - **`requestPasswordReset` must catch it.** Only a real account reaches the
+    send call, so an unhandled failure would answer the question the whole flow
+    refuses to answer: unknown addresses would get the confirmation while
+    registered ones got an error page. It logs and returns the same generic
+    response. `test/password-reset-action.test.ts` asserts all three outcomes are
+    identical; do not "improve" this by surfacing send errors to the user.
+  - The Resend call carries a 10s `AbortSignal.timeout`: without it a stalled
+    provider holds the server action open and turns slow mail into slow pages. The console transport also mirrors messages
   to `MAIL_OUTBOX_PATH` when set — a test-only seam the e2e suite uses to read
   the link it was sent. Nothing sets that variable outside `playwright.config.ts`.
 - `MIN_PASSWORD_LENGTH` lives in `lib/password-policy.ts`, not in an actions
