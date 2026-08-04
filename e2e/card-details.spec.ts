@@ -146,3 +146,76 @@ test("blocks a card, and refuses the loop that would close", async ({ page }) =>
 
   await expect(dialog.getByRole("alert")).toContainText(/loop/i);
 });
+
+test("deletes a card, and says what the delete takes with it", async ({ page }) => {
+  await openBoard(page);
+
+  // Its own cards: deleting a seeded one would move it out from under the
+  // assertions in due-status.spec, which reads the same shared database.
+  const stamp = Date.now();
+  const doomed = `Doomed card ${stamp}`;
+  const waiter = `Waiting card ${stamp}`;
+
+  const todo = page
+    .getByTestId("board-column")
+    .filter({ has: page.getByRole("heading", { name: "To Do", exact: true }) });
+
+  // Open the form once: it stays open and clears after each add, so you can
+  // enter several cards in a row. Clicking "+ Add a card" again would find no
+  // button, because the form has replaced it.
+  await todo.getByRole("button", { name: "+ Add a card" }).click();
+  for (const title of [doomed, waiter]) {
+    await todo.getByLabel("Card title").fill(title);
+    await todo.getByRole("button", { name: "Add card" }).click();
+    await expect(todo.getByText(title)).toBeVisible();
+  }
+
+  // Make one wait on the other, plus give the doomed card a checklist item, so
+  // the confirm has both consequences to report.
+  await openCard(page, waiter);
+  let dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Card that blocks this one").selectOption({ label: doomed });
+  await dialog.getByRole("button", { name: "Add", exact: true }).last().click();
+  await expect(dialog.getByText(doomed)).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await openCard(page, doomed);
+  dialog = page.getByRole("dialog");
+  await dialog.getByLabel("New checklist item").fill("Something to lose");
+  await dialog.getByRole("button", { name: "Add", exact: true }).first().click();
+  await expect(dialog.getByText("Something to lose")).toBeVisible();
+
+  // The confirm names both consequences before anything is destroyed.
+  await dialog.getByRole("button", { name: "Delete card" }).click();
+  await expect(dialog.getByText(`Delete “${doomed}”?`)).toBeVisible();
+  await expect(dialog.getByText(/1 checklist item/)).toBeVisible();
+  await expect(dialog.getByText(/1 card waiting on it will be unblocked/)).toBeVisible();
+
+  await dialog.getByRole("button", { name: "Delete card" }).click();
+  await expect(dialog).toBeHidden();
+
+  // Gone, and gone after a reload rather than only from local state.
+  await expect(page.locator(`[data-card-title="${doomed}"]`)).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator(`[data-card-title="${doomed}"]`)).toHaveCount(0);
+
+  // The waiting card survives and is no longer blocked.
+  const survivor = page.locator(`[data-card-title="${waiter}"]`);
+  await expect(survivor).toHaveCount(1);
+  await expect(survivor.getByTestId("card-blocked")).toHaveCount(0);
+});
+
+test("cancelling the delete confirm leaves the card alone", async ({ page }) => {
+  await openBoard(page);
+
+  const title = "Set up project repository";
+  await openCard(page, title);
+  const dialog = page.getByRole("dialog");
+
+  await dialog.getByRole("button", { name: "Delete card" }).click();
+  await expect(dialog.getByText(`Delete “${title}”?`)).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).last().click();
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(`[data-card-title="${title}"]`)).toHaveCount(1);
+});

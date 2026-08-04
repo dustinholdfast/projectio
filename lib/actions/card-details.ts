@@ -123,6 +123,36 @@ export async function updateCardDetails(
   revalidateBoard(boardId);
 }
 
+/**
+ * Delete a card.
+ *
+ * Its checklist items and both directions of its dependency links go with it via
+ * the schema's cascade — so deleting a card that blocks others silently unblocks
+ * them. That is the right behaviour (a link to a card that no longer exists is
+ * meaningless) but it is invisible from the card being deleted, which is why the
+ * dialog says how many cards are waiting on it before asking.
+ *
+ * Scoped by owner in the delete itself rather than checked beforehand: a forged
+ * id matches zero rows instead of relying on a separate lookup staying in step.
+ */
+export async function deleteCard(input: {
+  cardId: string;
+}): Promise<CardActionState> {
+  const userId = await requireUserId();
+  if (!userId) return { error: "Your session has expired. Please sign in again." };
+
+  // Read the board first — after the delete there is no row to walk back from.
+  const boardId = await ownedCardBoardId(input.cardId, userId);
+  if (!boardId) return { error: "Card not found." };
+
+  const result = await prisma.card.deleteMany({
+    where: { id: input.cardId, column: { board: { ownerId: userId } } },
+  });
+  if (result.count === 0) return { error: "Card not found." };
+
+  revalidateBoard(boardId);
+}
+
 // ── Checklist ────────────────────────────────────────────────────────────────
 
 export async function addChecklistItem(input: {

@@ -185,6 +185,11 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
 - **Description and Notes are different things.** Description is the short
   summary rendered on the card face; Notes is long-form and never leaves the
   dialog. Keep that split, or the board stops being scannable.
+- **Deleting a card cascades** to its checklist items and to its dependency
+  links in *both* directions — so it silently unblocks anything waiting on it.
+  That consequence is invisible from the card being deleted, which is why the
+  confirm counts the dependents and says so. `deleteCard` scopes the delete by
+  owner in the query itself rather than relying on the preceding lookup.
 - The detail fields save as one form; the checklist and blocker lists save on
   each interaction. That split is deliberate: the former are edited together and
   a per-field autosave would fire a request per keystroke in Notes, while each of
@@ -303,7 +308,8 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
   cross-account boundary (another user's board URL must 404).
   `e2e/card-details.spec.ts` covers the detail dialog: saving fields, the
   start/complete date validation, completion moving a card to the Completed lane,
-  the checklist, and blocking including the refused cycle.
+  the checklist, blocking including the refused cycle, and delete with its
+  consequence warning.
   `e2e/due-status.spec.ts` covers the schedule view: the toggle, seeded cards
   landing in the lane their date implies, Overdue refusing drops, and pause →
   resume round-tripping through a reload.

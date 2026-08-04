@@ -10,7 +10,7 @@ Written against the code as it stands on 2026-08-03 (Next.js 15.5.22, Prisma
 > verified**, along with auth rate limiting, password reset (§10.3), and
 > multi-board support, card scheduling, and the card detail dialog. Verified
 > locally against Postgres 17.10: migrations apply, the seed runs,
-> `npm run build` succeeds, 117 unit tests pass, and all 18 Playwright end-to-end
+> `npm run build` succeeds, 123 unit tests pass, and all 20 Playwright end-to-end
 > tests pass — board create/rename/delete, the cross-account 404, card create and
 > keyboard-drag reorder with persistence, the Overdue / Due Now / Later / Paused /
 > Completed schedule view, card details with checklists and dependency-cycle

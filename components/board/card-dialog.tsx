@@ -15,6 +15,7 @@ import {
 import {
   addCardBlocker,
   addChecklistItem,
+  deleteCard,
   deleteChecklistItem,
   removeCardBlocker,
   setChecklistItemDone,
@@ -377,7 +378,122 @@ export function CardDialog({
           />
         ) : null}
       </section>
+
+      <section className="border-t border-border p-6">
+        <DeleteCard
+          card={card}
+          // Cards waiting on this one, counted from the board we already have
+          // rather than with another query.
+          dependents={allCards.filter((other) =>
+            other.blockedBy.some((block) => block.blockerId === card.id),
+          )}
+          disabled={isPending}
+          onDeleted={onClose}
+        />
+      </section>
     </Dialog>
+  );
+}
+
+/**
+ * Delete, behind a confirm that states the consequences.
+ *
+ * The cascade is the reason for the wording: checklist items go, and so do the
+ * dependency links in both directions — which means other cards silently stop
+ * being blocked. That is invisible from here, so the confirm names it.
+ */
+function DeleteCard({
+  card,
+  dependents,
+  disabled,
+  onDeleted,
+}: {
+  card: BoardCard;
+  dependents: BoardCard[];
+  disabled: boolean;
+  onDeleted: () => void;
+}) {
+  const router = useRouter();
+  const [confirming, setConfirming] = React.useState(false);
+  const [error, setError] = React.useState<string>();
+  const [isDeleting, startDeleting] = React.useTransition();
+
+  if (!confirming) {
+    return (
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-xs text-muted-foreground">
+          Deleting a card cannot be undone.
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={disabled}
+          onClick={() => setConfirming(true)}
+        >
+          Delete card
+        </Button>
+      </div>
+    );
+  }
+
+  const consequences = [
+    card.checklist.length > 0
+      ? `${card.checklist.length} checklist item${card.checklist.length === 1 ? "" : "s"}`
+      : null,
+    dependents.length > 0
+      ? `${dependents.length} card${dependents.length === 1 ? "" : "s"} waiting on it will be unblocked`
+      : null,
+  ].filter(Boolean);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <p className="text-sm font-medium">Delete “{card.title}”?</p>
+        {consequences.length > 0 ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            This also removes {consequences.join(", and ")}.
+          </p>
+        ) : null}
+      </div>
+
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          disabled={isDeleting}
+          onClick={() =>
+            startDeleting(async () => {
+              const result = await deleteCard({ cardId: card.id });
+              if (result?.error) {
+                setError(result.error);
+                return;
+              }
+              // Close first: the card this dialog is showing no longer exists.
+              onDeleted();
+              router.refresh();
+            })
+          }
+        >
+          {isDeleting ? "Deleting…" : "Delete card"}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          disabled={isDeleting}
+          onClick={() => {
+            setConfirming(false);
+            setError(undefined);
+          }}
+        >
+          Cancel
+        </Button>
+      </div>
+    </div>
   );
 }
 
