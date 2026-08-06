@@ -9,7 +9,7 @@ const { authMock, prismaMock, revalidateMock, redirectMock } = vi.hoisted(() => 
   prismaMock: {
     card: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
     column: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
-    board: { updateMany: vi.fn(), deleteMany: vi.fn() },
+    board: { findFirst: vi.fn(), update: vi.fn(), delete: vi.fn() },
   },
   revalidateMock: vi.fn(),
   // `redirect` throws in Next so control never returns; mirror that here or the
@@ -33,6 +33,15 @@ import {
 
 const USER = "u1";
 
+/** Give the session user a role on every board these tests touch. */
+function grant(role: "VIEWER" | "EDITOR" | "OWNER") {
+  prismaMock.board.findFirst.mockResolvedValue(
+    role === "OWNER"
+      ? { ownerId: USER, members: [] }
+      : { ownerId: "owner", members: [{ role }] },
+  );
+}
+
 /** Build the FormData a board action receives from its form. */
 function form(fields: Record<string, string>): FormData {
   const data = new FormData();
@@ -46,16 +55,17 @@ beforeEach(() => {
     throw new Error(`NEXT_REDIRECT:${path}`);
   });
   authMock.mockResolvedValue({ user: { id: USER } });
+  grant("EDITOR");
   prismaMock.card.update.mockResolvedValue({});
   prismaMock.column.update.mockResolvedValue({});
 });
 
 describe("reorderCard", () => {
   function ownedCard(boardId = "b1") {
-    return { column: { boardId, board: { ownerId: USER } } };
+    return { column: { boardId } };
   }
   function ownedColumn(boardId = "b1") {
-    return { boardId, board: { ownerId: USER } };
+    return { boardId };
   }
 
   it("writes the midpoint of its two neighbors and revalidates", async () => {
@@ -118,11 +128,10 @@ describe("reorderCard", () => {
     });
   });
 
-  it("rejects a card the user does not own and writes nothing", async () => {
-    prismaMock.card.findUnique.mockResolvedValue({
-      column: { boardId: "b1", board: { ownerId: "someone-else" } },
-    });
+  it("rejects a card on a board the user is not a member of", async () => {
+    prismaMock.card.findUnique.mockResolvedValue(ownedCard());
     prismaMock.column.findUnique.mockResolvedValue(ownedColumn());
+    prismaMock.board.findFirst.mockResolvedValue(null);
 
     const result = await reorderCard({
       cardId: "cX",
@@ -169,10 +178,7 @@ describe("reorderCard", () => {
 
 describe("reorderColumn", () => {
   it("writes the midpoint of its neighbor columns", async () => {
-    prismaMock.column.findUnique.mockResolvedValue({
-      boardId: "b1",
-      board: { ownerId: USER },
-    });
+    prismaMock.column.findUnique.mockResolvedValue({ boardId: "b1" });
     prismaMock.column.findFirst
       .mockResolvedValueOnce({ position: 2000 }) // prev
       .mockResolvedValueOnce({ position: 3000 }); // next
@@ -191,10 +197,7 @@ describe("reorderColumn", () => {
   });
 
   it("scopes neighbor lookups to the same board", async () => {
-    prismaMock.column.findUnique.mockResolvedValue({
-      boardId: "b1",
-      board: { ownerId: USER },
-    });
+    prismaMock.column.findUnique.mockResolvedValue({ boardId: "b1" });
     prismaMock.column.findFirst.mockResolvedValue({ position: 2000 });
 
     await reorderColumn({
@@ -209,11 +212,9 @@ describe("reorderColumn", () => {
     });
   });
 
-  it("rejects a column the user does not own", async () => {
-    prismaMock.column.findUnique.mockResolvedValue({
-      boardId: "b1",
-      board: { ownerId: "someone-else" },
-    });
+  it("rejects a column on a board the user is not a member of", async () => {
+    prismaMock.column.findUnique.mockResolvedValue({ boardId: "b1" });
+    prismaMock.board.findFirst.mockResolvedValue(null);
 
     const result = await reorderColumn({
       columnId: "colX",
@@ -227,43 +228,52 @@ describe("reorderColumn", () => {
 });
 
 describe("renameBoard", () => {
-  it("scopes the update by owner, so a forged id matches nothing", async () => {
-    prismaMock.board.updateMany.mockResolvedValue({ count: 1 });
+  it("renames when the user owns the board", async () => {
+    grant("OWNER");
+    prismaMock.board.update.mockResolvedValue({});
 
     const result = await renameBoard(undefined, form({ boardId: "b1", name: "Q3 Plan" }));
 
     expect(result).toBeUndefined();
-    expect(prismaMock.board.updateMany).toHaveBeenCalledWith({
-      where: { id: "b1", ownerId: USER },
+    expect(prismaMock.board.update).toHaveBeenCalledWith({
+      where: { id: "b1" },
       data: { name: "Q3 Plan" },
     });
     expect(revalidateMock).toHaveBeenCalledWith("/board/b1");
-    expect(revalidateMock).toHaveBeenCalledWith("/");
   });
 
-  it("reports not-found when the scoped update matched no rows", async () => {
-    // What a board owned by someone else looks like from here.
-    prismaMock.board.updateMany.mockResolvedValue({ count: 0 });
+  it("refuses an editor, because renaming is an owner decision", async () => {
+    grant("EDITOR");
+
+    const result = await renameBoard(undefined, form({ boardId: "b1", name: "Mine now" }));
+
+    expect(result).toEqual({ error: "Only the board owner can do that." });
+    expect(prismaMock.board.update).not.toHaveBeenCalled();
+  });
+
+  it("reports not-found for a board the user cannot see", async () => {
+    prismaMock.board.findFirst.mockResolvedValue(null);
 
     const result = await renameBoard(undefined, form({ boardId: "bX", name: "Mine now" }));
 
     expect(result).toEqual({ error: "Board not found." });
-    expect(revalidateMock).not.toHaveBeenCalled();
+    expect(prismaMock.board.update).not.toHaveBeenCalled();
   });
 
   it("rejects a blank name without writing", async () => {
     const result = await renameBoard(undefined, form({ boardId: "b1", name: "   " }));
 
     expect(result).toEqual({ error: "Enter a name for your board." });
-    expect(prismaMock.board.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.board.update).not.toHaveBeenCalled();
   });
 
   it("trims and caps an over-long name rather than rejecting it", async () => {
-    prismaMock.board.updateMany.mockResolvedValue({ count: 1 });
+    grant("OWNER");
+    prismaMock.board.update.mockResolvedValue({});
 
     await renameBoard(undefined, form({ boardId: "b1", name: `  ${"x".repeat(200)}  ` }));
 
-    const { name } = prismaMock.board.updateMany.mock.calls[0][0].data;
+    const { name } = prismaMock.board.update.mock.calls[0][0].data;
     expect(name).toHaveLength(80);
   });
 
@@ -275,30 +285,41 @@ describe("renameBoard", () => {
     expect(result).toEqual({
       error: "Your session has expired. Please sign in again.",
     });
-    expect(prismaMock.board.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.board.update).not.toHaveBeenCalled();
   });
 });
 
 describe("deleteBoard", () => {
-  it("deletes only a board the session user owns, then returns to the list", async () => {
-    prismaMock.board.deleteMany.mockResolvedValue({ count: 1 });
+  it("deletes when the user owns the board", async () => {
+    grant("OWNER");
+    prismaMock.board.delete.mockResolvedValue({});
 
     await expect(deleteBoard(form({ boardId: "b1" }))).rejects.toThrow(
       "NEXT_REDIRECT:/",
     );
 
-    expect(prismaMock.board.deleteMany).toHaveBeenCalledWith({
-      where: { id: "b1", ownerId: USER },
-    });
+    expect(prismaMock.board.delete).toHaveBeenCalledWith({ where: { id: "b1" } });
   });
 
-  it("sends an unauthenticated caller to login without deleting", async () => {
+  it("refuses an editor, and still redirects rather than erroring", async () => {
+    // This action redirects rather than rendering, so there is nowhere to put a
+    // message: a non-owner lands back on the list with the board intact.
+    grant("EDITOR");
+
+    await expect(deleteBoard(form({ boardId: "b1" }))).rejects.toThrow(
+      "NEXT_REDIRECT:/",
+    );
+
+    expect(prismaMock.board.delete).not.toHaveBeenCalled();
+  });
+
+  it("deletes nothing for an unauthenticated caller", async () => {
     authMock.mockResolvedValue(null);
 
     await expect(deleteBoard(form({ boardId: "b1" }))).rejects.toThrow(
-      "NEXT_REDIRECT:/login",
+      "NEXT_REDIRECT:/",
     );
 
-    expect(prismaMock.board.deleteMany).not.toHaveBeenCalled();
+    expect(prismaMock.board.delete).not.toHaveBeenCalled();
   });
 });

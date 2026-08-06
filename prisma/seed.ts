@@ -25,6 +25,25 @@ import { PrismaPg } from "@prisma/adapter-pg";
 const DEMO_EMAIL = "demo@example.com";
 const DEMO_PASSWORD = "password123";
 
+/**
+ * Second accounts for the sharing end-to-end tests.
+ *
+ * Seeded rather than signed up during the run, because signup is rate limited to
+ * 5 per hour per IP and every test shares one address. The suite was tipping over
+ * that limit and failing a sharing test with an unhelpful navigation timeout —
+ * the limiter working correctly, on traffic that merely looked like abuse.
+ *
+ * Only the accounts that are *scenery* are seeded. The tests that actually
+ * exercise signup still sign up for real; the point is not to spend the budget
+ * on accounts no test is making an assertion about.
+ *
+ * They own no boards — every board they touch is one they are invited to.
+ */
+const SHARING_FIXTURES = [
+  { email: "sharing-guest@example.com", password: "guest-password-1" },
+  { email: "sharing-late@example.com", password: "guest-password-4" },
+];
+
 // Columns are ordered left-to-right and cards top-to-bottom by a Float
 // `position`. Seed positions are spaced by 1000 so a card dropped between two
 // neighbors can take their midpoint many times over without needing a rebalance.
@@ -46,9 +65,18 @@ async function main() {
     create: { email: DEMO_EMAIL, passwordHash, name: "Demo User" },
   });
 
+  for (const fixture of SHARING_FIXTURES) {
+    const fixtureHash = await bcrypt.hash(fixture.password, 10);
+    await prisma.user.upsert({
+      where: { email: fixture.email },
+      update: { passwordHash: fixtureHash },
+      create: { email: fixture.email, passwordHash: fixtureHash },
+    });
+  }
+
   // Clear any existing boards for the demo user so re-seeding is deterministic.
   // The cascade (board → columns → cards) removes all dependent rows.
-  await prisma.board.deleteMany({ where: { ownerId: user.id } });
+  await prisma.board.deleteMany({ where: { members: { some: { userId: user.id } } } });
 
   // Boards with their columns and cards defined declaratively, then created with
   // nested writes so positions stay in sync with declaration order. Two boards,

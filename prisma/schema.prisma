@@ -28,7 +28,10 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  /// Boards this user owns and boards shared with them are deliberately
+  /// separate: Board.ownerId is canonical ownership; BoardMember grants access.
   boards              Board[]
+  memberships         BoardMember[]
   passwordResetTokens PasswordResetToken[]
 }
 
@@ -70,6 +73,17 @@ model AuthAttempt {
 
 /// A Kanban board owned by a single User. Deleting the owner cascades to their
 /// boards (and, transitively, columns and cards).
+/// What a member may do on a board.
+///
+/// Ordered least to most privileged; `lib/authz.ts` compares them by rank rather
+/// than by listing roles at each call site, so adding a role later does not mean
+/// auditing every check.
+enum BoardRole {
+  VIEWER
+  EDITOR
+  OWNER
+}
+
 model Board {
   id        String   @id @default(cuid())
   name      String
@@ -77,10 +91,60 @@ model Board {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  owner   User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  columns Column[]
+  owner      User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  columns    Column[]
+  members    BoardMember[]
+  shareLinks BoardShareLink[]
 
   @@index([ownerId])
+}
+
+/// Who may touch a board, and how.
+///
+/// Owners do not also receive a membership row. `Board.ownerId` is the sole
+/// source of truth for ownership; this table contains VIEWER and EDITOR grants.
+/// The migration enforces that distinction with a CHECK constraint because
+/// Prisma does not currently express CHECK constraints in this schema.
+model BoardMember {
+  boardId   String
+  userId    String
+  role      BoardRole
+  createdAt DateTime  @default(now())
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([boardId, userId])
+  // "Which boards can this user see" is the board-list query, and runs on every
+  // page load.
+  @@index([userId])
+}
+
+/// A capability URL granting access to a board at a fixed role.
+///
+/// Only a SHA-256 hash is stored. The raw URL is returned once at creation; the
+/// owner can later identify the link by a short non-secret prefix, revoke it, or
+/// create a replacement.
+///
+/// A link grants EDITOR or VIEWER only, expires, and remains individually
+/// revocable without exposing a reusable credential in a database backup.
+model BoardShareLink {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  tokenPrefix String
+  boardId   String
+  /// The role granted on joining. OWNER is rejected in the action layer.
+  role      BoardRole
+  expiresAt DateTime
+  /// Set when the link is turned off. Revoking does NOT remove people who
+  /// already joined — they are members in their own right by then, and the
+  /// members list is where you remove them.
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@index([boardId])
 }
 
 /// A vertical lane on a board (e.g. "To Do", "In Progress", "Done").
@@ -121,9 +185,9 @@ model Card {
   columnId    String
 
   // ── Detail fields (edited in the card dialog) ─────────────────────────────
-  /// Free text, not a User relation. Boards are single-owner with no sharing, so
-  /// a relation would point every card at the same account. Becomes a relation
-  /// when teams exist.
+  /// Legacy free-text responsibility label, not a User relation. Proper member
+  /// assignment is a later collaboration feature and should use a dedicated
+  /// relation rather than silently changing the meaning of this field.
   owner       String?
   /// Long-form detail. Unlike `description` this never renders on the card face,
   /// so it can run to any length without making the board unscannable.

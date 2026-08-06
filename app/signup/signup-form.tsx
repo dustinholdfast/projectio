@@ -15,7 +15,7 @@ function SubmitButton() {
   );
 }
 
-export function SignupForm() {
+export function SignupForm({ callbackUrl = "/" }: { callbackUrl?: string }) {
   const [state, formAction] = useActionState<AuthActionState, FormData>(
     signup,
     undefined,
@@ -23,6 +23,7 @@ export function SignupForm() {
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
+      <input type="hidden" name="callbackUrl" value={callbackUrl} />
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="name">Name</Label>
         <Input

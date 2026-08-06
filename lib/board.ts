@@ -1,10 +1,12 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { roleOfUser, type BoardRole } from "@/lib/authz";
 
-// Read helpers for the board screens. Every query is scoped to the session user,
-// so a board is only ever loaded for the account that owns it — an unowned id and
-// an unknown one are indistinguishable, and the caller 404s either way rather
-// than confirming that someone else's board exists.
+// Read helpers for the board screens. Every query is scoped by *membership*, so a
+// board is only ever loaded for an account that has been granted access — a board
+// the user is not a member of and one that does not exist are indistinguishable,
+// and the caller 404s either way rather than confirming someone else's board is
+// there.
 //
 // Columns and cards come back already ordered by their `position` Float
 // (ascending = left-to-right for columns, top-to-bottom for cards) so the view
@@ -22,6 +24,10 @@ export type BoardSummary = {
   updatedAt: Date;
   columnCount: number;
   cardCount: number;
+  /** The signed-in user's role on this board. */
+  role: BoardRole;
+  /** How many people can see it, owner included. 1 = not shared. */
+  memberCount: number;
 };
 
 /**
@@ -37,14 +43,21 @@ export async function getUserBoards(): Promise<BoardSummary[]> {
   const userId = session?.user?.id;
   if (!userId) return [];
 
+  // Owned and shared boards belong in the same list.
   const boards = await prisma.board.findMany({
-    where: { ownerId: userId },
+    where: {
+      OR: [{ ownerId: userId }, { members: { some: { userId } } }],
+    },
     orderBy: { updatedAt: "desc" },
     select: {
       id: true,
       name: true,
+      ownerId: true,
       updatedAt: true,
       columns: { select: { _count: { select: { cards: true } } } },
+      _count: { select: { members: true } },
+      // Just this user's row, to label the tile with their own role.
+      members: { where: { userId }, select: { role: true } },
     },
   });
 
@@ -54,6 +67,11 @@ export async function getUserBoards(): Promise<BoardSummary[]> {
     updatedAt: board.updatedAt,
     columnCount: board.columns.length,
     cardCount: board.columns.reduce((sum, column) => sum + column._count.cards, 0),
+    role:
+      board.ownerId === userId
+        ? "OWNER"
+        : (board.members[0]?.role ?? "VIEWER"),
+    memberCount: board._count.members + 1,
   }));
 }
 
@@ -69,7 +87,12 @@ export async function getBoardForUser(boardId: string) {
   if (!userId) return null;
 
   return prisma.board.findFirst({
-    where: { id: boardId, ownerId: userId },
+    // The access filter is part of the query, so an inaccessible board is
+    // indistinguishable from one that does not exist.
+    where: {
+      id: boardId,
+      OR: [{ ownerId: userId }, { members: { some: { userId } } }],
+    },
     include: {
       columns: {
         orderBy: { position: "asc" },
@@ -94,4 +117,93 @@ export async function getBoardForUser(boardId: string) {
       },
     },
   });
+}
+
+export type BoardMemberSummary = {
+  userId: string;
+  email: string;
+  name: string | null;
+  role: BoardRole;
+  isYou: boolean;
+};
+
+export type ShareLinkSummary = {
+  id: string;
+  tokenPrefix: string;
+  role: BoardRole;
+  createdAt: Date;
+  revokedAt: Date | null;
+  expiresAt: Date;
+};
+
+/**
+ * Members and share links for the sharing panel.
+ *
+ * Owner-only data: a viewer has no business seeing the full membership list or
+ * even the non-secret prefixes used to distinguish managed links.
+ * Returns null for anyone who is not the owner, and the caller renders nothing.
+ */
+export async function getBoardSharing(boardId: string): Promise<{
+  members: BoardMemberSummary[];
+  links: ShareLinkSummary[];
+} | null> {
+  const session = await auth();
+  const userId = session?.user?.id;
+  if (!userId) return null;
+
+  const role = await roleOfUser(boardId, userId);
+  if (role !== "OWNER") return null;
+
+  const [board, members, links] = await Promise.all([
+    prisma.board.findUnique({
+      where: { id: boardId },
+      select: {
+        ownerId: true,
+        owner: { select: { email: true, name: true } },
+      },
+    }),
+    prisma.boardMember.findMany({
+      where: { boardId },
+      orderBy: [{ role: "desc" }, { createdAt: "asc" }],
+      select: {
+        userId: true,
+        role: true,
+        user: { select: { email: true, name: true } },
+      },
+    }),
+    prisma.boardShareLink.findMany({
+      where: { boardId },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        tokenPrefix: true,
+        role: true,
+        createdAt: true,
+        revokedAt: true,
+        expiresAt: true,
+      },
+    }),
+  ]);
+
+  if (!board) return null;
+
+  return {
+    members: [
+      {
+        userId: board.ownerId,
+        email: board.owner.email,
+        name: board.owner.name,
+        role: "OWNER",
+        isYou: board.ownerId === userId,
+      },
+      ...members.map((member) => ({
+        userId: member.userId,
+        email: member.user.email,
+        name: member.user.name,
+        role: member.role,
+        isYou: member.userId === userId,
+      })),
+    ],
+    links,
+  };
 }

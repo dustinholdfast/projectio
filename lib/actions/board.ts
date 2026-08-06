@@ -7,6 +7,11 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { POSITION_STEP, midpointPosition } from "@/lib/reorder";
 import {
+  requireBoardAccess,
+  requireCardAccess,
+  requireColumnAccess,
+} from "@/lib/authz";
+import {
   type DueStatus,
   parseDueDate,
   scheduleForStatus,
@@ -61,8 +66,14 @@ export async function createBoard(
   const name = readBoardName(formData);
   if (!name) return { error: "Enter a name for your board." };
 
+  // The creator's OWNER membership is written in the same statement as the
+  // board. A board with no members is unreachable by anyone — invisible and
+  // undeletable — so these must never be two separate writes that can half-fail.
   const board = await prisma.board.create({
-    data: { name, ownerId: userId },
+    data: {
+      name,
+      ownerId: userId,
+    },
     select: { id: true },
   });
 
@@ -72,70 +83,60 @@ export async function createBoard(
   redirect(`/board/${board.id}`);
 }
 
-/** Rename a board the current user owns. */
+/** Rename a board. Owner only. */
 export async function renameBoard(
   _prevState: BoardActionState,
   formData: FormData,
 ): Promise<BoardActionState> {
-  const userId = await requireUserId();
-  if (!userId) return { error: "Your session has expired. Please sign in again." };
-
   const boardId = String(formData.get("boardId") ?? "");
   const name = readBoardName(formData);
   if (!boardId) return { error: "Missing board." };
   if (!name) return { error: "Enter a name for your board." };
 
-  // Scoping the update by ownerId means a forged boardId matches zero rows
-  // rather than renaming someone else's board.
-  const result = await prisma.board.updateMany({
-    where: { id: boardId, ownerId: userId },
-    data: { name },
-  });
-  if (result.count === 0) return { error: "Board not found." };
+  const access = await requireBoardAccess(boardId, "OWNER");
+  if (!access.ok) return { error: access.error };
+
+  await prisma.board.update({ where: { id: boardId }, data: { name } });
 
   revalidateBoard(boardId);
 }
 
 /**
- * Delete a board the current user owns, and return to the list.
+ * Delete a board, and return to the list. Owner only — an editor can empty a
+ * board but cannot destroy it, and other members lose it without warning.
  *
- * Columns and cards go with it via the schema's cascade — there is no separate
- * cleanup, and no way to recover it, which is why the UI confirms first.
+ * Columns, cards, memberships and share links go with it via the schema's
+ * cascade. There is no way to recover it, which is why the UI confirms first.
  */
 export async function deleteBoard(formData: FormData): Promise<void> {
-  const userId = await requireUserId();
-  if (!userId) redirect("/login");
-
   const boardId = String(formData.get("boardId") ?? "");
+
   if (boardId) {
-    await prisma.board.deleteMany({ where: { id: boardId, ownerId: userId } });
+    const access = await requireBoardAccess(boardId, "OWNER");
+    // Silent on refusal: this action redirects rather than rendering, so there
+    // is nowhere to show a message. A non-owner simply lands back on the list
+    // with the board still there.
+    if (access.ok) {
+      await prisma.board.delete({ where: { id: boardId } });
+    }
   }
 
   revalidatePath("/");
   redirect("/");
 }
 
-/** Append a new column to a board the current user owns. */
+/** Append a new column. Editors and above. */
 export async function createColumn(
   _prevState: BoardActionState,
   formData: FormData,
 ): Promise<BoardActionState> {
-  const userId = await requireUserId();
-  if (!userId) return { error: "Your session has expired. Please sign in again." };
-
   const boardId = String(formData.get("boardId") ?? "");
   const name = String(formData.get("name") ?? "").trim();
   if (!boardId) return { error: "Missing board." };
   if (!name) return { error: "Enter a column name." };
 
-  // Ownership check: the board must belong to the current user.
-  const board = await prisma.board.findUnique({
-    where: { id: boardId },
-    select: { ownerId: true },
-  });
-  if (!board || board.ownerId !== userId) {
-    return { error: "Board not found." };
-  }
+  const access = await requireBoardAccess(boardId, "EDITOR");
+  if (!access.ok) return { error: access.error };
 
   const last = await prisma.column.findFirst({
     where: { boardId },
@@ -154,29 +155,19 @@ export async function createColumn(
   revalidateBoard(boardId);
 }
 
-/** Append a new card to a column whose board the current user owns. */
+/** Append a new card. Editors and above. */
 export async function createCard(
   _prevState: BoardActionState,
   formData: FormData,
 ): Promise<BoardActionState> {
-  const userId = await requireUserId();
-  if (!userId) return { error: "Your session has expired. Please sign in again." };
-
   const columnId = String(formData.get("columnId") ?? "");
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   if (!columnId) return { error: "Missing column." };
   if (!title) return { error: "Enter a card title." };
 
-  // Ownership check: walk column → board → owner in one query. `boardId` comes
-  // back too, so the revalidation below can target this board's route.
-  const column = await prisma.column.findUnique({
-    where: { id: columnId },
-    select: { boardId: true, board: { select: { ownerId: true } } },
-  });
-  if (!column || column.board.ownerId !== userId) {
-    return { error: "Column not found." };
-  }
+  const access = await requireColumnAccess(columnId, "EDITOR");
+  if (!access.ok) return { error: access.error };
 
   const last = await prisma.card.findFirst({
     where: { columnId },
@@ -193,7 +184,7 @@ export async function createCard(
     },
   });
 
-  revalidateBoard(column.boardId);
+  revalidateBoard(access.boardId);
 }
 
 // ── Drag-drop reordering ────────────────────────────────────────────────────
@@ -215,30 +206,21 @@ export async function reorderColumn(input: {
   prevColumnId: string | null;
   nextColumnId: string | null;
 }): Promise<ReorderResult> {
-  const userId = await requireUserId();
-  if (!userId) return { error: "Your session has expired. Please sign in again." };
-
-  // Ownership: the moved column must belong to a board the current user owns.
-  const column = await prisma.column.findUnique({
-    where: { id: input.columnId },
-    select: { boardId: true, board: { select: { ownerId: true } } },
-  });
-  if (!column || column.board.ownerId !== userId) {
-    return { error: "Column not found." };
-  }
+  const access = await requireColumnAccess(input.columnId, "EDITOR");
+  if (!access.ok) return { error: access.error };
 
   // Read neighbor positions scoped to the same board so a forged neighbor id from
   // another board can never influence the computed position.
   const [prev, next] = await Promise.all([
     input.prevColumnId
       ? prisma.column.findFirst({
-          where: { id: input.prevColumnId, boardId: column.boardId },
+          where: { id: input.prevColumnId, boardId: access.boardId },
           select: { position: true },
         })
       : null,
     input.nextColumnId
       ? prisma.column.findFirst({
-          where: { id: input.nextColumnId, boardId: column.boardId },
+          where: { id: input.nextColumnId, boardId: access.boardId },
           select: { position: true },
         })
       : null,
@@ -249,7 +231,7 @@ export async function reorderColumn(input: {
     data: { position: midpointPosition(prev?.position, next?.position) },
   });
 
-  revalidateBoard(column.boardId);
+  revalidateBoard(access.boardId);
 }
 
 /**
@@ -262,29 +244,16 @@ export async function reorderCard(input: {
   prevCardId: string | null;
   nextCardId: string | null;
 }): Promise<ReorderResult> {
-  const userId = await requireUserId();
-  if (!userId) return { error: "Your session has expired. Please sign in again." };
-
-  // Ownership: both the moved card and the destination column must belong to a
-  // board the current user owns. Reading the board id off each lets us also reject
-  // moves that would cross boards.
-  const [card, toColumn] = await Promise.all([
-    prisma.card.findUnique({
-      where: { id: input.cardId },
-      select: { column: { select: { boardId: true, board: { select: { ownerId: true } } } } },
-    }),
-    prisma.column.findUnique({
-      where: { id: input.toColumnId },
-      select: { boardId: true, board: { select: { ownerId: true } } },
-    }),
+  // Both ends are checked: the card being moved, and the column it lands in.
+  // Checking only one would let a card be dragged into a board the user cannot
+  // write to, or a foreign card be pulled into one they can.
+  const [cardAccess, columnAccess] = await Promise.all([
+    requireCardAccess(input.cardId, "EDITOR"),
+    requireColumnAccess(input.toColumnId, "EDITOR"),
   ]);
-  if (!card || card.column.board.ownerId !== userId) {
-    return { error: "Card not found." };
-  }
-  if (!toColumn || toColumn.board.ownerId !== userId) {
-    return { error: "Column not found." };
-  }
-  if (card.column.boardId !== toColumn.boardId) {
+  if (!cardAccess.ok) return { error: cardAccess.error };
+  if (!columnAccess.ok) return { error: columnAccess.error };
+  if (cardAccess.boardId !== columnAccess.boardId) {
     return { error: "Cards can only move within the same board." };
   }
 
@@ -313,7 +282,7 @@ export async function reorderCard(input: {
     },
   });
 
-  revalidateBoard(toColumn.boardId);
+  revalidateBoard(columnAccess.boardId);
 }
 
 // ── Scheduling ───────────────────────────────────────────────────────────────
@@ -322,19 +291,6 @@ export async function reorderCard(input: {
 // and `pausedAt` (see lib/due-status.ts) rather than stored, so these actions set
 // the underlying fields and let the status follow. That keeps a single source of
 // truth: a card cannot be marked "Overdue" while holding a future date.
-
-/** Look up a card the current user owns, returning the board it lives on. */
-async function ownedCardBoardId(
-  cardId: string,
-  userId: string,
-): Promise<string | null> {
-  const card = await prisma.card.findUnique({
-    where: { id: cardId },
-    select: { column: { select: { boardId: true, board: { select: { ownerId: true } } } } },
-  });
-  if (!card || card.column.board.ownerId !== userId) return null;
-  return card.column.boardId;
-}
 
 /**
  * Move a card into a due-status lane (the drag-and-drop path).
@@ -347,11 +303,9 @@ export async function setCardDueStatus(input: {
   cardId: string;
   status: DueStatus;
 }): Promise<ReorderResult> {
-  const userId = await requireUserId();
-  if (!userId) return { error: "Your session has expired. Please sign in again." };
-
-  const boardId = await ownedCardBoardId(input.cardId, userId);
-  if (!boardId) return { error: "Card not found." };
+  const access = await requireCardAccess(input.cardId, "EDITOR");
+  if (!access.ok) return { error: access.error };
+  const boardId = access.boardId;
 
   const current = await prisma.card.findUnique({
     where: { id: input.cardId },
@@ -380,11 +334,9 @@ export async function setCardDueDate(input: {
   /** `YYYY-MM-DD`, or empty to clear the date. */
   dueDate: string;
 }): Promise<ReorderResult> {
-  const userId = await requireUserId();
-  if (!userId) return { error: "Your session has expired. Please sign in again." };
-
-  const boardId = await ownedCardBoardId(input.cardId, userId);
-  if (!boardId) return { error: "Card not found." };
+  const access = await requireCardAccess(input.cardId, "EDITOR");
+  if (!access.ok) return { error: access.error };
+  const boardId = access.boardId;
 
   const trimmed = input.dueDate.trim();
   const dueDate = trimmed ? parseDueDate(trimmed) : null;
@@ -403,11 +355,9 @@ export async function setCardPaused(input: {
   cardId: string;
   paused: boolean;
 }): Promise<ReorderResult> {
-  const userId = await requireUserId();
-  if (!userId) return { error: "Your session has expired. Please sign in again." };
-
-  const boardId = await ownedCardBoardId(input.cardId, userId);
-  if (!boardId) return { error: "Card not found." };
+  const access = await requireCardAccess(input.cardId, "EDITOR");
+  if (!access.ok) return { error: access.error };
+  const boardId = access.boardId;
 
   await prisma.card.update({
     where: { id: input.cardId },

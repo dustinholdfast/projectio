@@ -2,9 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { POSITION_STEP } from "@/lib/reorder";
+import { requireCardAccess } from "@/lib/authz";
 import { parseDueDate } from "@/lib/due-status";
 import {
   BLOCK_REJECTION_MESSAGE,
@@ -15,9 +15,10 @@ import {
 // Server actions for the card detail dialog: the detail fields, the checklist,
 // and the blocked-by graph.
 //
-// Same rule as every other action in this app — re-read the session, prove the
-// target belongs to the current user by walking card → column → board → owner,
-// and only then write. A forged id must never reach another account's data.
+// Same rule as every other action in this app: resolve the target to its board
+// and require a minimum role via `@/lib/authz` before writing. Never inline the
+// check — a hand-rolled walk is how one of these ends up asking a subtly
+// different question from the rest, and a viewer edits someone else's board.
 
 export type CardActionState = { error: string } | undefined;
 
@@ -27,26 +28,6 @@ type Priority = (typeof PRIORITIES)[number];
 /** Caps, so a paste of a whole document cannot become a card field. */
 const MAX_SHORT = 120;
 const MAX_NOTES = 10_000;
-
-async function requireUserId(): Promise<string | null> {
-  const session = await auth();
-  return session?.user?.id ?? null;
-}
-
-/** The board a card belongs to, or null if the session user does not own it. */
-async function ownedCardBoardId(
-  cardId: string,
-  userId: string,
-): Promise<string | null> {
-  const card = await prisma.card.findUnique({
-    where: { id: cardId },
-    select: {
-      column: { select: { boardId: true, board: { select: { ownerId: true } } } },
-    },
-  });
-  if (!card || card.column.board.ownerId !== userId) return null;
-  return card.column.boardId;
-}
 
 function revalidateBoard(boardId: string): void {
   revalidatePath(`/board/${boardId}`);
@@ -64,14 +45,12 @@ export async function updateCardDetails(
   _prevState: CardActionState,
   formData: FormData,
 ): Promise<CardActionState> {
-  const userId = await requireUserId();
-  if (!userId) return { error: "Your session has expired. Please sign in again." };
-
   const cardId = String(formData.get("cardId") ?? "");
   if (!cardId) return { error: "Missing card." };
 
-  const boardId = await ownedCardBoardId(cardId, userId);
-  if (!boardId) return { error: "Card not found." };
+  const access = await requireCardAccess(cardId, "EDITOR");
+  if (!access.ok) return { error: access.error };
+  const boardId = access.boardId;
 
   const title = String(formData.get("title") ?? "").trim().slice(0, MAX_SHORT);
   if (!title) return { error: "A card needs a title." };
@@ -138,16 +117,12 @@ export async function updateCardDetails(
 export async function deleteCard(input: {
   cardId: string;
 }): Promise<CardActionState> {
-  const userId = await requireUserId();
-  if (!userId) return { error: "Your session has expired. Please sign in again." };
-
   // Read the board first — after the delete there is no row to walk back from.
-  const boardId = await ownedCardBoardId(input.cardId, userId);
-  if (!boardId) return { error: "Card not found." };
+  const access = await requireCardAccess(input.cardId, "EDITOR");
+  if (!access.ok) return { error: access.error };
+  const boardId = access.boardId;
 
-  const result = await prisma.card.deleteMany({
-    where: { id: input.cardId, column: { board: { ownerId: userId } } },
-  });
+  const result = await prisma.card.deleteMany({ where: { id: input.cardId } });
   if (result.count === 0) return { error: "Card not found." };
 
   revalidateBoard(boardId);
@@ -159,11 +134,9 @@ export async function addChecklistItem(input: {
   cardId: string;
   text: string;
 }): Promise<CardActionState> {
-  const userId = await requireUserId();
-  if (!userId) return { error: "Your session has expired. Please sign in again." };
-
-  const boardId = await ownedCardBoardId(input.cardId, userId);
-  if (!boardId) return { error: "Card not found." };
+  const access = await requireCardAccess(input.cardId, "EDITOR");
+  if (!access.ok) return { error: access.error };
+  const boardId = access.boardId;
 
   const text = input.text.trim().slice(0, MAX_SHORT);
   if (!text) return { error: "Enter something to add." };
@@ -189,59 +162,40 @@ export async function setChecklistItemDone(input: {
   itemId: string;
   done: boolean;
 }): Promise<CardActionState> {
-  const userId = await requireUserId();
-  if (!userId) return { error: "Your session has expired. Please sign in again." };
-
-  // Walk item → card → column → board → owner in one query.
+  // Resolve the item to its card, then let the shared walk decide. Doing the
+  // role check by hand here is what let the old code check only ownership.
   const item = await prisma.checklistItem.findUnique({
     where: { id: input.itemId },
-    select: {
-      card: {
-        select: {
-          column: {
-            select: { boardId: true, board: { select: { ownerId: true } } },
-          },
-        },
-      },
-    },
+    select: { cardId: true },
   });
-  if (!item || item.card.column.board.ownerId !== userId) {
-    return { error: "Item not found." };
-  }
+  if (!item) return { error: "Item not found." };
+
+  const access = await requireCardAccess(item.cardId, "EDITOR");
+  if (!access.ok) return { error: access.error };
 
   await prisma.checklistItem.update({
     where: { id: input.itemId },
     data: { done: input.done },
   });
 
-  revalidateBoard(item.card.column.boardId);
+  revalidateBoard(access.boardId);
 }
 
 export async function deleteChecklistItem(input: {
   itemId: string;
 }): Promise<CardActionState> {
-  const userId = await requireUserId();
-  if (!userId) return { error: "Your session has expired. Please sign in again." };
-
   const item = await prisma.checklistItem.findUnique({
     where: { id: input.itemId },
-    select: {
-      card: {
-        select: {
-          column: {
-            select: { boardId: true, board: { select: { ownerId: true } } },
-          },
-        },
-      },
-    },
+    select: { cardId: true },
   });
-  if (!item || item.card.column.board.ownerId !== userId) {
-    return { error: "Item not found." };
-  }
+  if (!item) return { error: "Item not found." };
+
+  const access = await requireCardAccess(item.cardId, "EDITOR");
+  if (!access.ok) return { error: access.error };
 
   await prisma.checklistItem.delete({ where: { id: input.itemId } });
 
-  revalidateBoard(item.card.column.boardId);
+  revalidateBoard(access.boardId);
 }
 
 // ── Dependencies ─────────────────────────────────────────────────────────────
@@ -258,17 +212,15 @@ export async function addCardBlocker(input: {
   blockedId: string;
   blockerId: string;
 }): Promise<CardActionState> {
-  const userId = await requireUserId();
-  if (!userId) return { error: "Your session has expired. Please sign in again." };
-
-  const boardId = await ownedCardBoardId(input.blockedId, userId);
-  if (!boardId) return { error: "Card not found." };
+  const access = await requireCardAccess(input.blockedId, "EDITOR");
+  if (!access.ok) return { error: access.error };
+  const boardId = access.boardId;
 
   // The blocker must be on the same board — and checking it through the same
-  // ownership walk means a blocker id from another account is rejected as
-  // "not on this board" rather than confirming it exists.
-  const blockerBoardId = await ownedCardBoardId(input.blockerId, userId);
-  if (blockerBoardId !== boardId) {
+  // access walk means a blocker id the user cannot reach is rejected as "not on
+  // this board" rather than confirming it exists.
+  const blockerAccess = await requireCardAccess(input.blockerId, "EDITOR");
+  if (!blockerAccess.ok || blockerAccess.boardId !== boardId) {
     return { error: BLOCK_REJECTION_MESSAGE["cross-board"] };
   }
 
@@ -300,11 +252,9 @@ export async function removeCardBlocker(input: {
   blockedId: string;
   blockerId: string;
 }): Promise<CardActionState> {
-  const userId = await requireUserId();
-  if (!userId) return { error: "Your session has expired. Please sign in again." };
-
-  const boardId = await ownedCardBoardId(input.blockedId, userId);
-  if (!boardId) return { error: "Card not found." };
+  const access = await requireCardAccess(input.blockedId, "EDITOR");
+  if (!access.ok) return { error: access.error };
+  const boardId = access.boardId;
 
   await prisma.cardBlock.deleteMany({
     where: { blockedId: input.blockedId, blockerId: input.blockerId },

@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { signIn, signOut } from "@/lib/auth";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
+import { safeCallbackUrl } from "@/lib/safe-callback-url";
 import {
   LOGIN_EMAIL_RULE,
   LOGIN_IP_RULE,
@@ -38,6 +39,7 @@ export async function login(
 ): Promise<AuthActionState> {
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
+  const redirectTo = safeCallbackUrl(formData.get("callbackUrl"));
 
   if (!email || !password) {
     return { error: "Enter your email and password." };
@@ -61,7 +63,7 @@ export async function login(
     await signIn("credentials", {
       email,
       password,
-      redirectTo: "/",
+      redirectTo,
     });
   } catch (error) {
     if (error instanceof AuthError) {
@@ -90,6 +92,7 @@ export async function signup(
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
   const name = String(formData.get("name") ?? "").trim();
+  const redirectTo = safeCallbackUrl(formData.get("callbackUrl"));
 
   if (!isValidEmail(email)) {
     return { error: "Enter a valid email address." };
@@ -130,7 +133,7 @@ export async function signup(
     await signIn("credentials", {
       email,
       password,
-      redirectTo: "/",
+      redirectTo,
     });
   } catch (error) {
     if (error instanceof AuthError) {

@@ -48,11 +48,14 @@ export function CardDialog({
   card,
   columns,
   onClose,
+  canEdit = true,
 }: {
   card: BoardCard;
   /** Every column on the board, for the blocker picker and the category list. */
   columns: ColumnWithCards[];
   onClose: () => void;
+  /** False for viewers: every field is read-only and the writes are hidden. */
+  canEdit?: boolean;
 }) {
   const router = useRouter();
   const [error, setError] = React.useState<string>();
@@ -127,6 +130,9 @@ export function CardDialog({
         }}
       >
         <input type="hidden" name="cardId" value={card.id} />
+        {/* One switch rather than `disabled` on each field: a viewer should still
+            be able to read and select the text, which `disabled` prevents. */}
+        <fieldset disabled={!canEdit} className="contents">
 
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1">
@@ -249,20 +255,28 @@ export function CardDialog({
           />
         </div>
 
+        </fieldset>
+
         {error ? (
           <p role="alert" className="text-sm text-destructive">
             {error}
           </p>
         ) : null}
 
-        <div className="flex items-center gap-2">
-          <Button type="submit" disabled={isPending}>
-            {isPending ? "Saving…" : "Save changes"}
-          </Button>
-          <Button type="button" variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-        </div>
+        {canEdit ? (
+          <div className="flex items-center gap-2">
+            <Button type="submit" disabled={isPending}>
+              {isPending ? "Saving…" : "Save changes"}
+            </Button>
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            You have view-only access to this board.
+          </p>
+        )}
       </form>
 
       {/* Checklist and blockers sit outside the form: they save on interaction,
@@ -283,6 +297,7 @@ export function CardDialog({
               <input
                 type="checkbox"
                 checked={item.done}
+                disabled={!canEdit}
                 aria-label={item.text}
                 onChange={(event) => {
                   const next = event.target.checked;
@@ -311,21 +326,25 @@ export function CardDialog({
               >
                 {item.text}
               </span>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                disabled={isPending}
-                aria-label={`Remove ${item.text}`}
-                onClick={() => run(() => deleteChecklistItem({ itemId: item.id }))}
-              >
-                Remove
-              </Button>
+              {canEdit ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={isPending}
+                  aria-label={`Remove ${item.text}`}
+                  onClick={() => run(() => deleteChecklistItem({ itemId: item.id }))}
+                >
+                  Remove
+                </Button>
+              ) : null}
             </li>
           ))}
         </ul>
 
-        <AddChecklistItem cardId={card.id} disabled={isPending} onDone={run} />
+        {canEdit ? (
+          <AddChecklistItem cardId={card.id} disabled={isPending} onDone={run} />
+        ) : null}
       </section>
 
       <section className="flex flex-col gap-3 border-t border-border p-6">
@@ -351,7 +370,8 @@ export function CardDialog({
                   type="button"
                   size="sm"
                   variant="ghost"
-                  disabled={isPending}
+                  disabled={isPending || !canEdit}
+                  hidden={!canEdit}
                   aria-label={`Unblock from ${block.blocker.title}`}
                   onClick={() =>
                     run(() =>
@@ -369,7 +389,7 @@ export function CardDialog({
           </ul>
         )}
 
-        {blockerCandidates.length > 0 ? (
+        {canEdit && blockerCandidates.length > 0 ? (
           <AddBlocker
             cardId={card.id}
             candidates={blockerCandidates}
@@ -379,6 +399,7 @@ export function CardDialog({
         ) : null}
       </section>
 
+      {canEdit ? (
       <section className="border-t border-border p-6">
         <DeleteCard
           card={card}
@@ -391,6 +412,7 @@ export function CardDialog({
           onDeleted={onClose}
         />
       </section>
+      ) : null}
     </Dialog>
   );
 }

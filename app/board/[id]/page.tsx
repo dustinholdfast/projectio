@@ -4,7 +4,9 @@ import { AppHeader } from "@/components/app-header";
 import { BoardView } from "@/components/board/board-view";
 import { BoardSettings } from "@/components/board/board-settings";
 import { GroupToggle } from "@/components/board/group-toggle";
-import { getBoardForUser } from "@/lib/board";
+import { SharePanel } from "@/components/board/share-panel";
+import { getBoardForUser, getBoardSharing } from "@/lib/board";
+import { boardRoleOf, ROLE_LABEL } from "@/lib/authz";
 
 // A single board. Protected by middleware; ownership is enforced by the query in
 // getBoardForUser, so a board belonging to someone else 404s exactly as an
@@ -26,6 +28,13 @@ export default async function BoardPage({
 
   if (!board) notFound();
 
+  // Role drives what the page offers. The server actions enforce it too — this
+  // only avoids showing controls that would be refused.
+  const role = (await boardRoleOf(id)) ?? "VIEWER";
+  const canEdit = role !== "VIEWER";
+  // Returns null for anyone but the owner, so the panel simply does not render.
+  const sharing = await getBoardSharing(id);
+
   // Anything other than an explicit "due" falls back to columns, so a mangled
   // URL degrades to the normal board rather than an error.
   const groupBy = group === "due" ? "due" : "column";
@@ -41,11 +50,35 @@ export default async function BoardPage({
         actions={
           <>
             <GroupToggle boardId={board.id} active={groupBy} />
-            <BoardSettings boardId={board.id} boardName={board.name} />
+            {sharing ? (
+              <SharePanel
+                boardId={board.id}
+                boardName={board.name}
+                members={sharing.members}
+                links={sharing.links}
+              />
+            ) : (
+              <BoardRoleBadge role={role} />
+            )}
+            {role === "OWNER" ? (
+              <BoardSettings boardId={board.id} boardName={board.name} />
+            ) : null}
           </>
         }
       />
-      <BoardView board={board} groupBy={groupBy} />
+      <BoardView board={board} groupBy={groupBy} canEdit={canEdit} />
     </main>
+  );
+}
+
+/** Shows a non-owner what they can do here, since they get no Share control. */
+function BoardRoleBadge({ role }: { role: "VIEWER" | "EDITOR" | "OWNER" }) {
+  return (
+    <span
+      data-testid="board-role"
+      className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground"
+    >
+      {ROLE_LABEL[role]}
+    </span>
   );
 }

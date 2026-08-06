@@ -82,13 +82,26 @@ type DragKind =
  */
 const OpenCardContext = React.createContext<(cardId: string) => void>(() => {});
 
+/**
+ * Whether the viewer may change anything.
+ *
+ * Context for the same reason as OpenCardContext: cards and columns render
+ * several layers down through two different paths, and read-only affects nearly
+ * every leaf. This hides affordances only — the server actions enforce the role
+ * independently, so a viewer who forges a request is still refused.
+ */
+const CanEditContext = React.createContext(true);
+
 export function BoardView({
   board,
   groupBy = "column",
+  canEdit = true,
 }: {
   board: BoardWithColumns;
   /** Which lanes to render. Driven by the `?group=` param so it survives reload. */
   groupBy?: "column" | "due";
+  /** False for viewers: drag is disabled and the create/edit controls are hidden. */
+  canEdit?: boolean;
 }) {
   const router = useRouter();
   const [columns, setColumns] = React.useState<ColumnWithCards[]>(board.columns);
@@ -119,11 +132,17 @@ export function BoardView({
     setColumns(board.columns);
   }, [board]);
 
+  // A viewer has nothing to drag. Disabling at the sensor keeps the cards inert
+  // rather than letting them move and then bounce back when the server refuses.
   const sensors = useSensors(
     // A small activation distance lets clicks on the in-column "add card" controls
     // through instead of being swallowed as drags.
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(PointerSensor, {
+      activationConstraint: canEdit ? { distance: 6 } : { distance: Infinity },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
   );
 
   const hueFor = React.useCallback(
@@ -168,6 +187,7 @@ export function BoardView({
   function handleDragEnd(event: DragEndEvent) {
     const { active: dragged, over } = event;
     setActive(null);
+    if (!canEdit) return;
     if (!over) return;
 
     const kind = dragged.data.current?.type;
@@ -265,6 +285,7 @@ export function BoardView({
 
   return (
     <OpenCardContext.Provider value={setOpenCardId}>
+    <CanEditContext.Provider value={canEdit}>
     <DndContext
       sensors={sensors}
       collisionDetection={closestCorners}
@@ -289,7 +310,7 @@ export function BoardView({
                 />
               ))}
             </SortableContext>
-            <AddColumnForm boardId={board.id} />
+            {canEdit ? <AddColumnForm boardId={board.id} /> : null}
           </>
         )}
       </section>
@@ -306,10 +327,12 @@ export function BoardView({
         <CardDialog
           card={openCard}
           columns={columns}
+          canEdit={canEdit}
           onClose={() => setOpenCardId(null)}
         />
       ) : null}
     </DndContext>
+    </CanEditContext.Provider>
     </OpenCardContext.Provider>
   );
 }
@@ -474,6 +497,27 @@ function DraggableCard({
   );
 }
 
+/** Per-card date/pause controls, hidden from viewers. */
+function CardScheduleIfEditable({ card }: { card: BoardCard }) {
+  const canEdit = React.useContext(CanEditContext);
+  if (!canEdit) return null;
+  return (
+    <CardContent className="p-0 pt-3">
+      <CardSchedule
+        cardId={card.id}
+        dueDate={card.dueDate}
+        paused={Boolean(card.pausedAt)}
+      />
+    </CardContent>
+  );
+}
+
+/** The add-card affordance, or nothing at all for a viewer. */
+function AddCardOrNothing({ columnId }: { columnId: string }) {
+  const canEdit = React.useContext(CanEditContext);
+  return canEdit ? <AddCardForm columnId={columnId} /> : null;
+}
+
 /** Lane accents: urgency reads as colour without needing to read the heading. */
 const DUE_HUE: Record<DueStatus, BadgeColor> = {
   overdue: "rose",
@@ -636,7 +680,7 @@ function ColumnShell({
         </SortableContext>
       </div>
 
-      <AddCardForm columnId={column.id} />
+      <AddCardOrNothing columnId={column.id} />
     </div>
   );
 }
@@ -722,15 +766,7 @@ function TaskCardShell({
           ) : null}
         </CardContent>
       ) : null}
-      {showSchedule && !dragging ? (
-        <CardContent className="p-0 pt-3">
-          <CardSchedule
-            cardId={card.id}
-            dueDate={card.dueDate}
-            paused={Boolean(card.pausedAt)}
-          />
-        </CardContent>
-      ) : null}
+      {showSchedule && !dragging ? <CardScheduleIfEditable card={card} /> : null}
     </Card>
   );
 }

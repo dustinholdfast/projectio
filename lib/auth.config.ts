@@ -22,6 +22,15 @@ const PUBLIC_PATHS = [
   "/reset-password",
 ];
 
+/**
+ * Share links must render for someone who is not signed in — that is the whole
+ * point of sending one to a person who may not have an account yet. The page
+ * itself redirects to login before letting anyone actually join.
+ */
+function isJoinPath(pathname: string): boolean {
+  return pathname.startsWith("/join/");
+}
+
 function isPublicPath(pathname: string): boolean {
   // `/design` is the internal design-system preview. It is public outside
   // production so the team can browse it without a session, but it is not
@@ -33,6 +42,7 @@ function isPublicPath(pathname: string): boolean {
   ) {
     return true;
   }
+  if (isJoinPath(pathname)) return true;
   return PUBLIC_PATHS.includes(pathname);
 }
 

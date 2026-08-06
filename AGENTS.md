@@ -180,6 +180,12 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
   must never confirm that someone else's board exists. `renameBoard` and
   `deleteBoard` use `updateMany`/`deleteMany` scoped by `ownerId` for the same
   reason: a forged id matches zero rows instead of hitting another user's data.
+- **Sharing keeps canonical ownership on `Board.ownerId`.** `BoardMember` contains
+  VIEWER/EDITOR collaborators only; database CHECK constraints reject OWNER in
+  membership and share-link rows. Share tokens are stored only as SHA-256 hashes
+  with an 8-character management prefix, expire after 1/7/30 days, and the raw
+  URL is returned once at creation. Redemption locks the indexed link row through
+  membership upsert, so revocation and joining cannot pass each other in flight.
 - Mutations are server actions in `lib/actions/board.ts`: `createBoard` (creates
   then `redirect`s into the new board), `renameBoard`, `deleteBoard` (cascades to
   columns and cards; the UI confirms first), `createColumn`, `createCard`, and
@@ -192,9 +198,9 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
 - Clicking a card opens `components/board/card-dialog.tsx`. It holds every field
   that does not belong on the card face: owner, category, priority, due/started/
   completed dates, description, notes, a checklist, and a blocked-by list.
-- **Owner is free text, not a `User` relation.** Boards are single-owner with no
-  sharing, so a relation would point every card at the same account. It becomes a
-  relation when teams exist — do not "fix" it before then.
+- **Card `owner` is a legacy free-text responsibility label, not a `User`
+  relation.** Board sharing does not silently change its meaning. A future member
+  assignment feature should add an explicit relation and migration.
 - **Description and Notes are different things.** Description is the short
   summary rendered on the card face; Notes is long-form and never leaves the
   dialog. Keep that split, or the board stops being scannable.

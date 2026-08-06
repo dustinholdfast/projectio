@@ -1,9 +1,21 @@
 import Link from "next/link";
 
 import { AuthShell } from "@/components/auth-shell";
+import { safeCallbackUrl } from "@/lib/safe-callback-url";
 import { SignupForm } from "./signup-form";
 
-export default function SignupPage() {
+export default async function SignupPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ callbackUrl?: string }>;
+}) {
+  const { callbackUrl: requestedCallback } = await searchParams;
+  const callbackUrl = safeCallbackUrl(requestedCallback);
+  const loginHref =
+    callbackUrl === "/"
+      ? "/login"
+      : `/login?callbackUrl=${encodeURIComponent(callbackUrl)}`;
+
   return (
     <AuthShell
       eyebrow="Get started"
@@ -13,7 +25,7 @@ export default function SignupPage() {
         <p className="text-sm text-muted-foreground">
           Already have an account?{" "}
           <Link
-            href="/login"
+            href={loginHref}
             className="font-medium text-primary hover:underline"
           >
             Sign in
@@ -21,7 +33,7 @@ export default function SignupPage() {
         </p>
       }
     >
-      <SignupForm />
+      <SignupForm callbackUrl={callbackUrl} />
     </AuthShell>
   );
 }
