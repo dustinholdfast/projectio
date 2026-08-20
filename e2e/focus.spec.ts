@@ -28,6 +28,36 @@ test("login lands on Focus with the most urgent card first", async ({ page }) =>
   // Seeded: overdue 3 days + URGENT outranks everything else on the demo boards.
   await expect(now).toContainText("Set up project repository");
   await expect(now).toContainText("Product Roadmap");
+  // The now card opens its checklist so the next step is visible, not buried.
+  await expect(now.getByRole("checkbox", { name: "Create private GitHub repo" })).toBeChecked();
+  await expect(now.getByRole("checkbox", { name: "Push the Next.js scaffold" })).not.toBeChecked();
+});
+
+test("ticking a checklist item on Focus updates the count", async ({ page }) => {
+  await loginAsDemo(page);
+
+  const now = page.getByTestId("focus-now");
+  await expect(now.getByTestId("focus-checklist")).toContainText("1/3");
+  await now.getByRole("checkbox", { name: "Push the Next.js scaffold" }).check();
+  await expect(now.getByTestId("focus-checklist")).toContainText("2/3");
+  // Leave the seed as we found it so a later spec reading this card is not surprised.
+  await now.getByRole("checkbox", { name: "Push the Next.js scaffold" }).uncheck();
+  await expect(now.getByTestId("focus-checklist")).toContainText("1/3");
+});
+
+test("a queue row expands its checklist without opening the board", async ({
+  page,
+}) => {
+  await loginAsDemo(page);
+
+  const row = page.locator(
+    `[data-testid="focus-row"][data-card-title="Audit current pages"]`,
+  );
+  await expect(row).toBeVisible();
+  await expect(row.getByRole("checkbox")).toHaveCount(0);
+  await row.getByRole("button", { name: /checklist/ }).click();
+  await expect(row.getByRole("checkbox", { name: "Blog archive" })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
 });
 
 test("a card created from Focus can be completed and lands in Done", async ({

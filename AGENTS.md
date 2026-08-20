@@ -184,7 +184,9 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
   and "unblocks N" (a keystone card rises). Completed sits at the bottom.
   The Focus lane is the work that still wants a decision: late, due now,
   urgent/high, due this week, blocked, or unblocking someone else. Parked and
-  finished work have already been decided.
+  finished work have already been decided. Cards with a checklist expand in
+  place: the now card is open, queue rows start collapsed, and ticking an
+  item uses the same `setChecklistItemDone` action the board dialog uses.
 - **Ownership is part of the query, not a check on the result.**
   `getBoardForUser` filters on `{ id, ownerId }` or membership, so another
   account's board is indistinguishable from a missing one and the page

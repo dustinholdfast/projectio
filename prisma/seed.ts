@@ -93,6 +93,7 @@ async function main() {
       category?: string;
       priority?: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
       completedDaysAgo?: number;
+      checklist?: { text: string; done?: boolean }[];
     }[];
   };
   type SeedBoard = { name: string; columns: SeedColumn[] };
@@ -119,6 +120,11 @@ async function main() {
           owner: "Dustin",
           category: "Infrastructure",
           priority: "URGENT",
+          checklist: [
+            { text: "Create private GitHub repo", done: true },
+            { text: "Push the Next.js scaffold" },
+            { text: "Add branch protection" },
+          ],
         },
         {
           title: "Draft product requirements",
@@ -144,6 +150,11 @@ async function main() {
           title: "Build board view",
           description: "Render columns and cards from the database.",
           dueInDays: -1,
+          checklist: [
+            { text: "Column layout", done: true },
+            { text: "Card drag" },
+            { text: "Optimistic reorder" },
+          ],
         },
         {
           title: "Wire up credential auth",
@@ -177,7 +188,11 @@ async function main() {
     {
       name: "Backlog",
       cards: [
-        { title: "Audit current pages", description: "Inventory what exists.", dueInDays: -5 },
+        { title: "Audit current pages", description: "Inventory what exists.", dueInDays: -5, checklist: [
+          { text: "Home and pricing", done: true },
+          { text: "Blog archive" },
+          { text: "Legal pages" },
+        ] },
         { title: "Collect brand assets", paused: true },
       ],
     },
@@ -219,6 +234,15 @@ async function main() {
                   card.completedDaysAgo === undefined
                     ? null
                     : dueDateIn(-card.completedDaysAgo),
+                checklist: card.checklist?.length
+                  ? {
+                      create: card.checklist.map((item, itemIndex) => ({
+                        text: item.text,
+                        done: Boolean(item.done),
+                        position: (itemIndex + 1) * POSITION_STEP,
+                      })),
+                    }
+                  : undefined,
               })),
             },
           })),

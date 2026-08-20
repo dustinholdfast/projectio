@@ -64,8 +64,7 @@ export type FocusItem = {
   openBlockers: string[];
   daysUntilDue: number | null;
   blockingCount: number;
-  checklistDone: number;
-  checklistTotal: number;
+  checklist: { id: string; text: string; done: boolean }[];
   canEdit: boolean;
 };
 
@@ -112,7 +111,10 @@ export async function getFocusWorkspace(): Promise<FocusWorkspace> {
               dueDate: true,
               pausedAt: true,
               completedAt: true,
-              checklist: { select: { done: true } },
+              checklist: {
+                select: { id: true, text: true, done: true },
+                orderBy: { position: "asc" },
+              },
               blockedBy: {
                 select: {
                   blocker: {
@@ -146,8 +148,7 @@ export async function getFocusWorkspace(): Promise<FocusWorkspace> {
     description: string | null;
     owner: string | null;
     category: string | null;
-    checklistDone: number;
-    checklistTotal: number;
+    checklist: { id: string; text: string; done: boolean }[];
   })[] = [];
 
   for (const board of boards) {
@@ -170,8 +171,7 @@ export async function getFocusWorkspace(): Promise<FocusWorkspace> {
           })),
           blocking: card.blocking.map((link) => ({ title: link.blocked.title })),
           boardId: board.id,
-          checklistDone: card.checklist.filter((item) => item.done).length,
-          checklistTotal: card.checklist.length,
+          checklist: card.checklist,
         });
       }
     }
@@ -201,8 +201,7 @@ export async function getFocusWorkspace(): Promise<FocusWorkspace> {
       openBlockers: card.openBlockers.map((blocker) => blocker.title),
       daysUntilDue: card.daysUntilDue,
       blockingCount: card.blocking.length,
-      checklistDone: extra.checklistDone,
-      checklistTotal: extra.checklistTotal,
+      checklist: extra.checklist,
       canEdit: board.canEdit,
     };
   });

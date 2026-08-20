@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { Badge, Button, Input, Label, Select } from "@/components/ui";
 import { setCardDueStatus, setCardPaused } from "@/lib/actions/board";
+import { setChecklistItemDone } from "@/lib/actions/card-details";
 import { createFocusCard } from "@/lib/actions/focus";
 import {
   FOCUS_LANES,
@@ -46,7 +47,8 @@ export function FocusView({ workspace, firstName }: Props) {
         item.title.toLowerCase().includes(q) ||
         item.board.name.toLowerCase().includes(q) ||
         (item.category ?? "").toLowerCase().includes(q) ||
-        (item.owner ?? "").toLowerCase().includes(q)
+        (item.owner ?? "").toLowerCase().includes(q) ||
+        item.checklist.some((check) => check.text.toLowerCase().includes(q))
       );
     });
   }, [workspace.items, lane, boardId, query]);
@@ -186,6 +188,9 @@ export function FocusView({ workspace, firstName }: Props) {
                 }),
               )
             }
+            onTick={(itemId, done) =>
+              refreshAfter(() => setChecklistItemDone({ itemId, done }))
+            }
           />
         ) : (
           <EmptyLane
@@ -222,6 +227,9 @@ export function FocusView({ workspace, firstName }: Props) {
                             item.status === "completed" ? "later" : "completed",
                         }),
                       )
+                    }
+                    onTick={(itemId, done) =>
+                      refreshAfter(() => setChecklistItemDone({ itemId, done }))
                     }
                   />
                 ))}
@@ -346,11 +354,13 @@ function NowCard({
   busy,
   onComplete,
   onPause,
+  onTick,
 }: {
   item: FocusItem;
   busy: boolean;
   onComplete: () => void;
   onPause: () => void;
+  onTick: (itemId: string, done: boolean) => void;
 }) {
   return (
     <article
@@ -385,6 +395,12 @@ function NowCard({
             {item.reasons.join(" · ")}
           </p>
         ) : null}
+        <ExpandableChecklist
+          items={item.checklist}
+          canEdit={item.canEdit}
+          defaultOpen
+          onTick={onTick}
+        />
         <div className="mt-5 flex flex-wrap gap-2">
           {item.canEdit ? (
             <>
@@ -418,11 +434,13 @@ function FocusRow({
   index,
   busy,
   onToggle,
+  onTick,
 }: {
   item: FocusItem;
   index: number;
   busy: boolean;
   onToggle: () => void;
+  onTick: (itemId: string, done: boolean) => void;
 }) {
   return (
     <li>
@@ -456,39 +474,105 @@ function FocusRow({
         ) : (
           <span className="w-3 shrink-0" />
         )}
-        <Link
-          href={`/board/${item.board.id}`}
-          className="flex min-w-0 flex-1 items-start gap-3 px-1 py-2.5 pr-3 text-left sm:items-center"
-        >
+        <div className="flex min-w-0 flex-1 items-start gap-3 px-1 py-2.5 pr-3">
           <span className="hidden w-6 shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground sm:block">
             {String(index).padStart(2, "0")}
           </span>
-          <span className="min-w-0 flex-1">
-            <span
-              className={cn(
-                "block truncate text-sm font-medium tracking-tight",
-                item.status === "completed" &&
-                  "text-muted-foreground line-through",
-              )}
+          <div className="min-w-0 flex-1">
+            <Link
+              href={`/board/${item.board.id}`}
+              className="block rounded outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              {item.title}
-            </span>
-            <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-              <Badge color={item.board.color}>{item.board.name}</Badge>
-              {item.reasons[0] ? <span>{item.reasons[0]}</span> : null}
-              {item.checklistTotal > 0 ? (
-                <span className="font-mono tabular-nums">
-                  {item.checklistDone}/{item.checklistTotal}
-                </span>
-              ) : null}
-            </span>
-          </span>
+              <span
+                className={cn(
+                  "block truncate text-sm font-medium tracking-tight",
+                  item.status === "completed" &&
+                    "text-muted-foreground line-through",
+                )}
+              >
+                {item.title}
+              </span>
+              <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                <Badge color={item.board.color}>{item.board.name}</Badge>
+                {item.reasons[0] ? <span>{item.reasons[0]}</span> : null}
+              </span>
+            </Link>
+            <ExpandableChecklist
+              items={item.checklist}
+              canEdit={item.canEdit}
+              onTick={onTick}
+            />
+          </div>
           <span className="hidden shrink-0 sm:block">
             <DueBadge item={item} />
           </span>
-        </Link>
+        </div>
       </div>
     </li>
+  );
+}
+
+function ExpandableChecklist({
+  items,
+  canEdit,
+  defaultOpen = false,
+  onTick,
+}: {
+  items: FocusItem["checklist"];
+  canEdit: boolean;
+  defaultOpen?: boolean;
+  onTick: (itemId: string, done: boolean) => void;
+}) {
+  const [open, setOpen] = React.useState(defaultOpen);
+  if (items.length === 0) return null;
+  const done = items.filter((item) => item.done).length;
+  return (
+    <div data-testid="focus-checklist" className="mt-1.5">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="inline-flex h-8 items-center gap-1.5 rounded-md px-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+      >
+        <span className="font-mono tabular-nums">
+          {done}/{items.length}
+        </span>
+        <span>checklist</span>
+        <span
+          aria-hidden
+          className={cn(
+            "ml-0.5 inline-block size-0 border-x-[3.5px] border-t-[4px] border-x-transparent border-t-current transition-transform duration-150",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open ? (
+        <ul className="mt-0.5 flex flex-col">
+          {items.map((item) => (
+            <li key={item.id}>
+              <label className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-md px-1 hover:bg-accent/70">
+                <input
+                  type="checkbox"
+                  checked={item.done}
+                  disabled={!canEdit}
+                  aria-label={item.text}
+                  onChange={(event) => onTick(item.id, event.target.checked)}
+                  className="size-4 shrink-0 accent-[var(--color-primary)]"
+                />
+                <span
+                  className={cn(
+                    "text-sm leading-snug",
+                    item.done && "text-muted-foreground line-through",
+                  )}
+                >
+                  {item.text}
+                </span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 
