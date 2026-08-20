@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { gotoReady, waitForLanding } from "./helpers";
+import { gotoReady, gotoBoards, waitForLanding } from "./helpers";
 
 // Coverage of the card detail dialog: opening it by clicking a card, saving the
 // detail fields, the checklist, and the blocked-by graph including its refusals.
@@ -13,6 +13,7 @@ async function openBoard(page: Page) {
   await page.getByLabel("Password").fill(DEMO_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await waitForLanding(page);
+  await gotoBoards(page);
 
   await page.getByTestId("board-tile").filter({ hasText: "Product Roadmap" }).click();
   await expect(page).toHaveURL(/\/board\/[^/]+$/);

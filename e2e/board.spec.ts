@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { gotoReady, waitForLanding } from "./helpers";
+import { gotoReady, gotoBoards, waitForLanding } from "./helpers";
 
 // End-to-end coverage of the board's core flows against a real dev server and a
 // freshly-seeded database (see playwright.config.ts / global-setup.ts):
@@ -21,9 +21,9 @@ const TODO_CARDS = [
 /**
  * Sign in and open the seeded "Product Roadmap" board.
  *
- * Login lands on the board *list*, so these specs go through it. Afterwards the
- * page sits on /board/[id], which is what makes the plain `page.reload()` calls
- * below still land on the board.
+ * Login lands on Focus, so these specs go through `/boards` afterwards. The
+ * page then sits on /board/[id], which is what makes the plain `page.reload()`
+ * calls below still land on the board.
  */
 async function login(page: Page): Promise<void> {
   await gotoReady(page, "/login");
@@ -31,6 +31,7 @@ async function login(page: Page): Promise<void> {
   await page.getByLabel("Password").fill(DEMO_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await waitForLanding(page);
+  await gotoBoards(page);
 
   await page
     .getByTestId("board-tile")

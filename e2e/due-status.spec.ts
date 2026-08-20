@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { gotoReady, waitForLanding } from "./helpers";
+import { gotoReady, gotoBoards, waitForLanding } from "./helpers";
 
 // Coverage of the schedule view: the grouping toggle, that seeded cards land in
 // the lane their due date implies, and that pausing/scheduling moves them between
@@ -18,6 +18,7 @@ async function openScheduleView(page: Page) {
   await page.getByLabel("Password").fill(DEMO_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await waitForLanding(page);
+  await gotoBoards(page);
 
   await page.getByTestId("board-tile").filter({ hasText: "Product Roadmap" }).click();
   await expect(page).toHaveURL(/\/board\/[^/]+$/);

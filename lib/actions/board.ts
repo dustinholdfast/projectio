@@ -44,6 +44,7 @@ async function requireUserId(): Promise<string | null> {
 function revalidateBoard(boardId: string): void {
   revalidatePath(`/board/${boardId}`);
   revalidatePath("/");
+  revalidatePath("/boards");
 }
 
 /** Longest accepted board name — enough for a real title, short enough to render. */
@@ -78,6 +79,7 @@ export async function createBoard(
   });
 
   revalidatePath("/");
+  revalidatePath("/boards");
   // Straight into the new board — creating one and then having to find it in the
   // list would be a pointless extra step.
   redirect(`/board/${board.id}`);
@@ -122,7 +124,8 @@ export async function deleteBoard(formData: FormData): Promise<void> {
   }
 
   revalidatePath("/");
-  redirect("/");
+  revalidatePath("/boards");
+  redirect("/boards");
 }
 
 /** Append a new column. Editors and above. */

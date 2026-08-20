@@ -295,7 +295,7 @@ describe("deleteBoard", () => {
     prismaMock.board.delete.mockResolvedValue({});
 
     await expect(deleteBoard(form({ boardId: "b1" }))).rejects.toThrow(
-      "NEXT_REDIRECT:/",
+      "NEXT_REDIRECT:/boards",
     );
 
     expect(prismaMock.board.delete).toHaveBeenCalledWith({ where: { id: "b1" } });
@@ -307,7 +307,7 @@ describe("deleteBoard", () => {
     grant("EDITOR");
 
     await expect(deleteBoard(form({ boardId: "b1" }))).rejects.toThrow(
-      "NEXT_REDIRECT:/",
+      "NEXT_REDIRECT:/boards",
     );
 
     expect(prismaMock.board.delete).not.toHaveBeenCalled();
@@ -317,7 +317,7 @@ describe("deleteBoard", () => {
     authMock.mockResolvedValue(null);
 
     await expect(deleteBoard(form({ boardId: "b1" }))).rejects.toThrow(
-      "NEXT_REDIRECT:/",
+      "NEXT_REDIRECT:/boards",
     );
 
     expect(prismaMock.board.delete).not.toHaveBeenCalled();

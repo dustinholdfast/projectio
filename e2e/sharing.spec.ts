@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { gotoReady, waitForLanding } from "./helpers";
+import { gotoReady, gotoBoards, waitForLanding } from "./helpers";
 
 // Sharing, end to end and across two real accounts.
 //
@@ -71,7 +71,7 @@ async function ensureAccount(page: Page, email: string, password: string) {
 
 /** Create a board of our own, so these tests never disturb the seeded ones. */
 async function createBoard(page: Page, name: string): Promise<string> {
-  await gotoReady(page, "/");
+  await gotoBoards(page);
   await page.getByLabel("Board name").fill(name);
   await page.getByRole("button", { name: "Create board" }).click();
   await expect(page).toHaveURL(/\/board\/[^/]+$/);

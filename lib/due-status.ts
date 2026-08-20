@@ -169,6 +169,14 @@ export function parseDueDate(value: string): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/** Whole days from today to the due date. Negative = already late. Null = unscheduled. */
+export function daysUntilDue(dueDate: Date | null, now: Date): number | null {
+  if (!dueDate) return null;
+  const due = Date.parse(`${dayKeyOfDueDate(dueDate)}T00:00:00`);
+  const today = Date.parse(`${dayKeyOfInstant(now)}T00:00:00`);
+  return Math.round((due - today) / 86_400_000);
+}
+
 /** Group cards into lanes, preserving the order they arrive in. */
 export function groupByDueStatus<T extends SchedulableCard>(
   cards: readonly T[],

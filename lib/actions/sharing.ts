@@ -41,6 +41,7 @@ const EXPIRATION_DAYS = new Set([1, 7, 30]);
 function revalidateBoard(boardId: string): void {
   revalidatePath(`/board/${boardId}`);
   revalidatePath("/");
+  revalidatePath("/boards");
 }
 
 /**
@@ -275,5 +276,6 @@ export async function leaveBoard(formData: FormData): Promise<void> {
   }
 
   revalidatePath("/");
+  revalidatePath("/boards");
   redirect("/");
 }

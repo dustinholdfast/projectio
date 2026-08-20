@@ -167,18 +167,29 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
 
 ## Boards
 
-- **Two screens.** `/` (`app/page.tsx`) lists every board the user owns;
-  `/board/[id]` (`app/board/[id]/page.tsx`) is one board. Both are protected
-  Server Components. `/` is the post-login/signup landing route.
+- **Three screens.** `/` (`app/page.tsx`) is Focus — every card the signed-in
+  user can see, ranked into one queue. `/boards` (`app/boards/page.tsx`) lists
+  every board they own or have been shared. `/board/[id]` is one board. All
+  three are protected Server Components. `/` is the post-login/signup landing.
 - `getUserBoards()` (`lib/board.ts`) returns summaries ordered by `updatedAt`
   desc, with column/card totals from `_count` aggregates rather than by loading
   every card. `getBoardForUser(id)` returns one board with columns (`position`
   asc = left→right) each with their cards (`position` asc = top→bottom).
+  `getFocusWorkspace()` (`lib/focus.ts`) flattens every accessible board's
+  cards, ranks them (`lib/importance.ts`), and hands the pane a serialised
+  queue. Ranking is pure so the weights are testable without Prisma.
+- **Focus ranking** (`lib/importance.ts`) is derived, never stored. Overdue
+  and due-today dominate, then priority (URGENT beats a multi-day overdue HIGH
+  only when the date weight is smaller), then blockers (a waiting card drops)
+  and "unblocks N" (a keystone card rises). Completed sits at the bottom.
+  The Focus lane is the work that still wants a decision: late, due now,
+  urgent/high, due this week, blocked, or unblocking someone else. Parked and
+  finished work have already been decided.
 - **Ownership is part of the query, not a check on the result.**
-  `getBoardForUser` filters on `{ id, ownerId }`, so another account's board is
-  indistinguishable from a missing one and the page `notFound()`s either way — it
-  must never confirm that someone else's board exists. `renameBoard` and
-  `deleteBoard` use `updateMany`/`deleteMany` scoped by `ownerId` for the same
+  `getBoardForUser` filters on `{ id, ownerId }` or membership, so another
+  account's board is indistinguishable from a missing one and the page
+  `notFound()`s either way — it must never confirm that someone else's board
+  exists. `renameBoard` and `deleteBoard` use owner-scoped writes for the same
   reason: a forged id matches zero rows instead of hitting another user's data.
 - **Sharing keeps canonical ownership on `Board.ownerId`.** `BoardMember` contains
   VIEWER/EDITOR collaborators only; database CHECK constraints reject OWNER in
@@ -188,11 +199,13 @@ Planning artifacts live in .castforge/ (plan.md, research.md, decisions.md, ui-s
   membership upsert, so revocation and joining cannot pass each other in flight.
 - Mutations are server actions in `lib/actions/board.ts`: `createBoard` (creates
   then `redirect`s into the new board), `renameBoard`, `deleteBoard` (cascades to
-  columns and cards; the UI confirms first), `createColumn`, `createCard`, and
-  the two reorder actions. Board names are trimmed and capped at 80 chars.
-- **Revalidate through `revalidateBoard(boardId)`**, which refreshes both
-  `/board/[id]` and `/` — the list shows per-board counts, so a card write
-  changes it too. Do not reintroduce a bare `revalidatePath("/")`.
+  columns and cards, then `redirect`s to `/boards`; the UI confirms first),
+  `createColumn`, `createCard`, and the two reorder actions. Board names are
+  trimmed and capped at 80 chars. The Focus composer (`createFocusCard`) appends
+  to the board's first column — Focus has no column of its own.
+- **Revalidate through `revalidateBoard(boardId)`**, which refreshes
+  `/board/[id]`, `/` (Focus), and `/boards` — a card write changes the pane and
+  the list counts. Do not reintroduce a bare `revalidatePath("/")`.
 ### Card details
 
 - Clicking a card opens `components/board/card-dialog.tsx`. It holds every field

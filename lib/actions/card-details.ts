@@ -32,6 +32,7 @@ const MAX_NOTES = 10_000;
 function revalidateBoard(boardId: string): void {
   revalidatePath(`/board/${boardId}`);
   revalidatePath("/");
+  revalidatePath("/boards");
 }
 
 /** Trim, cap, and treat blank as "cleared" rather than as an empty string. */

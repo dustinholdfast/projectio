@@ -6,6 +6,7 @@ import {
   dayKeyOfDueDate,
   dayKeyOfInstant,
   dueStatusOf,
+  daysUntilDue,
   groupByDueStatus,
   parseDueDate,
   scheduleForStatus,
@@ -75,6 +76,20 @@ describe("dueStatusOf", () => {
     expect(
       dueStatusOf({ dueDate: dueOn("2027-01-01"), pausedAt: null, completedAt: null }, newYearsDay),
     ).toBe("dueNow");
+  });
+});
+
+describe("daysUntilDue", () => {
+  it("is negative when the due day is already past", () => {
+    expect(daysUntilDue(dueOn("2026-08-01"), NOW)).toBe(-2);
+  });
+
+  it("is zero on the due day itself", () => {
+    expect(daysUntilDue(dueOn("2026-08-03"), NOW)).toBe(0);
+  });
+
+  it("is null when there is no due date", () => {
+    expect(daysUntilDue(null, NOW)).toBeNull();
   });
 });
 

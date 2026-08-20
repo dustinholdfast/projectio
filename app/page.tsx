@@ -1,94 +1,31 @@
-import Link from "next/link";
-
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { AppHeader } from "@/components/app-header";
-import { CreateBoardForm } from "@/components/board/create-board-form";
-import { getUserBoards, type BoardSummary } from "@/lib/board";
+import { FocusView } from "@/components/focus/focus-view";
+import { auth } from "@/lib/auth";
+import { getFocusWorkspace } from "@/lib/focus";
 
-// The board list — the app root, and where login/signup land. A protected route
-// (see middleware.ts). This server component fetches every board the signed-in
-// user owns, with column/card counts, and links each one to /board/[id].
-// Presentation follows the "Calm Focus" direction.
+// The Focus pane — the post-login landing. Every card the signed-in user can
+// see, across every board they own or have been shared, ranked into one queue.
+// Boards stay at /boards; this page is the decision, not the filing cabinet.
 
-export default async function BoardsPage() {
-  const boards = await getUserBoards();
+export default async function FocusPage() {
+  const [workspace, session] = await Promise.all([
+    getFocusWorkspace(),
+    auth(),
+  ]);
+
+  const firstName =
+    session?.user?.name?.split(" ")[0] ||
+    session?.user?.email?.split("@")[0] ||
+    "there";
 
   return (
     <main className="flex min-h-screen flex-col bg-background text-foreground">
       <AppHeader
-        title="Your boards"
-        subtitle={
-          boards.length
-            ? `${boards.length} board${boards.length === 1 ? "" : "s"}`
-            : undefined
-        }
+        title="Focus"
+        subtitle="What to do next, across every board"
+        active="focus"
       />
-
-      <section className="mx-auto w-full max-w-5xl flex-1 p-4 sm:p-6">
-        {boards.length === 0 ? (
-          <EmptyState />
-        ) : (
-          <div className="flex flex-col gap-8">
-            <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {boards.map((board) => (
-                <li key={board.id}>
-                  <BoardTile board={board} />
-                </li>
-              ))}
-            </ul>
-
-            <Card className="w-full max-w-sm shadow-md">
-              <CardHeader className="gap-1 p-6 pb-4">
-                <CardTitle className="text-base">New board</CardTitle>
-              </CardHeader>
-              <CardContent className="p-6 pt-0">
-                <CreateBoardForm />
-              </CardContent>
-            </Card>
-          </div>
-        )}
-      </section>
+      <FocusView workspace={workspace} firstName={firstName} />
     </main>
-  );
-}
-
-function BoardTile({ board }: { board: BoardSummary }) {
-  return (
-    <Link
-      href={`/board/${board.id}`}
-      data-testid="board-tile"
-      data-board-name={board.name}
-      className="block h-full rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-    >
-      <Card className="h-full shadow-sm transition-shadow hover:shadow-md">
-        <CardHeader className="gap-1 p-5 pb-3">
-          <CardTitle className="truncate text-base">{board.name}</CardTitle>
-        </CardHeader>
-        <CardContent className="p-5 pt-0">
-          <p className="text-sm text-muted-foreground">
-            {board.columnCount} column{board.columnCount === 1 ? "" : "s"} ·{" "}
-            {board.cardCount} card{board.cardCount === 1 ? "" : "s"}
-          </p>
-        </CardContent>
-      </Card>
-    </Link>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="flex flex-1 items-center justify-center py-16">
-      <Card className="w-full max-w-sm shadow-md">
-        <CardHeader className="gap-2 p-6 pb-4">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Get started
-          </span>
-          <CardTitle className="text-xl">Create your first board</CardTitle>
-        </CardHeader>
-        <CardContent className="p-6 pt-0">
-          <CreateBoardForm />
-        </CardContent>
-      </Card>
-    </div>
   );
 }

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { gotoReady, waitForLanding } from "./helpers";
+import { gotoReady, gotoBoards, waitForLanding } from "./helpers";
 
 // Coverage of the multi-board surface: the list, creating a board, renaming it,
 // deleting it, and the ownership boundary between accounts.
@@ -17,6 +17,7 @@ async function loginAsDemo(page: Page) {
 
 test("lists every seeded board and opens one", async ({ page }) => {
   await loginAsDemo(page);
+  await gotoBoards(page);
 
   const tiles = page.getByTestId("board-tile");
   await expect(tiles.filter({ hasText: "Product Roadmap" })).toBeVisible();
@@ -36,6 +37,7 @@ test("lists every seeded board and opens one", async ({ page }) => {
 
 test("creates a board, opens it, renames it, and deletes it", async ({ page }) => {
   await loginAsDemo(page);
+  await gotoBoards(page);
 
   const name = `E2E Board ${Date.now()}`;
   await page.getByLabel("Board name").fill(name);
@@ -53,7 +55,7 @@ test("creates a board, opens it, renames it, and deletes it", async ({ page }) =
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByRole("heading", { name: renamed })).toBeVisible();
 
-  await gotoReady(page, "/");
+  await gotoBoards(page);
   await expect(
     page.getByTestId("board-tile").filter({ hasText: renamed }),
   ).toBeVisible();
@@ -64,7 +66,7 @@ test("creates a board, opens it, renames it, and deletes it", async ({ page }) =
   await expect(page.getByText(/Delete .* and everything on it\?/)).toBeVisible();
   await page.getByRole("button", { name: "Delete board" }).click();
 
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/boards$/);
   await expect(
     page.getByTestId("board-tile").filter({ hasText: renamed }),
   ).toHaveCount(0);
@@ -73,6 +75,7 @@ test("creates a board, opens it, renames it, and deletes it", async ({ page }) =
 test("a board belonging to another account is not reachable", async ({ page }) => {
   // Note the id of a board the demo user owns...
   await loginAsDemo(page);
+  await gotoBoards(page);
   await page.getByTestId("board-tile").filter({ hasText: "Product Roadmap" }).click();
   await expect(page).toHaveURL(/\/board\/[^/]+$/);
   const victimUrl = page.url();
